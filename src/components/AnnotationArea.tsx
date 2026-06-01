@@ -1,11 +1,13 @@
 import { useEffect, useRef } from 'react'
 import { useStore } from '../store/useStore'
-import { COLOR_TEAM_A } from '../constants'
+import { COLOR_TEAM_A, COLOR_TEAM_B, QUARTER_BUCKET_S } from '../constants'
 
-const CELL_W    = 58   // px per shot-clock second
-const LABEL_W   = 160  // px for the sticky defender label column
-const HEADER_H  = 52   // px for header row (two lines: shot clock + quarter clock)
-const ROW_H     = 44   // px per defender row
+const CELL_W_POSS    = 58   // px per shot-clock second (possession mode)
+const CELL_W_QUARTER = 36   // px per 1-second bucket (quarter mode)
+const LABEL_W        = 160  // px for the sticky defender label column
+const HEADER_H       = 68   // px for header row (three lines)
+const ROW_H          = 44   // px per defender row
+const DEAD_ROW_H     = 26   // px for the dead-time toggle row
 
 function fmtClock(s: number): string {
   if (!isFinite(s)) return '--:--'
@@ -15,50 +17,71 @@ function fmtClock(s: number): string {
 }
 
 export default function AnnotationArea() {
-  const possession      = useStore(s => s.possession)
-  const frames          = useStore(s => s.frames)
-  const currentFrame    = useStore(s => s.currentFrame)
-  const cellAnnotations = useStore(s => s.cellAnnotations)
-  const playerDict      = useStore(s => s.playerDict)
-  const scrollRef       = useRef<HTMLDivElement>(null)
+  const possession         = useStore(s => s.possession)
+  const quarterMeta        = useStore(s => s.quarterMeta)
+  const mode               = useStore(s => s.mode)
+  const frames             = useStore(s => s.frames)
+  const currentFrame       = useStore(s => s.currentFrame)
+  const cellAnnotations    = useStore(s => s.cellAnnotations)
+  const deadTimeBuckets    = useStore(s => s.deadTimeBuckets)
+  const playerDict         = useStore(s => s.playerDict)
+  const scrollRef          = useRef<HTMLDivElement>(null)
 
-  if (!possession) {
+  const meta   = possession ?? quarterMeta
+  const isQtr  = mode === 'quarter'
+  const CELL_W = isQtr ? CELL_W_QUARTER : CELL_W_POSS
+
+  if (!meta) {
     return (
       <div style={{ padding: 16, color: '#555', fontSize: 13 }}>
-        Load possession data to annotate
+        Load tracking data to annotate
       </div>
     )
   }
 
-  const defTeam = possession.defendingTeamId === possession.teamA.teamId
-    ? possession.teamA
-    : possession.teamB
+  const defTeam = meta.defendingTeamId === meta.teamA.teamId ? meta.teamA : meta.teamB
+  const defColor = defTeam.teamId === meta.teamA.teamId ? COLOR_TEAM_A : COLOR_TEAM_B
 
-  // Collect unique shot-clock buckets from frames, sorted descending (24 → 0)
-  const buckets: number[] = [...new Set(
-    frames
-      .filter(f => f.shotClock !== null && !isNaN(f.shotClock!))
-      .map(f => Math.floor(f.shotClock!))
-  )].sort((a, b) => b - a)
+  // Only show defenders currently on the court
+  const onCourtIds  = new Set((frames[currentFrame]?.players ?? []).map(p => p.id))
+  const defPlayers  = defTeam.players.filter(p => onCourtIds.has(p.id))
 
-  // For each bucket, compute the representative quarter clock (highest = possession start of that second)
-  const bucketQClock = new Map<number, number>()
+  // ── Buckets ──────────────────────────────────────────────────────────────
+  const getBucket = (qc: number, sc: number | null) =>
+    isQtr
+      ? Math.floor(qc / QUARTER_BUCKET_S) * QUARTER_BUCKET_S
+      : sc !== null && !isNaN(sc) ? Math.floor(sc) : null
+
+  const buckets: number[] = isQtr
+    ? [...new Set(frames.map(f => Math.floor(f.quarterClock / QUARTER_BUCKET_S) * QUARTER_BUCKET_S))]
+        .sort((a, b) => b - a)
+    : [...new Set(
+        frames
+          .filter(f => f.shotClock !== null && !isNaN(f.shotClock!))
+          .map(f => Math.floor(f.shotClock!))
+      )].sort((a, b) => b - a)
+
+  // Per-bucket: representative quarter clock + first frame index
+  const bucketQClock     = new Map<number, number>()
+  const bucketFrameStart = new Map<number, number>()
   for (const f of frames) {
-    if (f.shotClock !== null && !isNaN(f.shotClock!)) {
-      const b = Math.floor(f.shotClock!)
+    const b = getBucket(f.quarterClock, f.shotClock)
+    if (b === null) continue
+    if (!bucketFrameStart.has(b) || f.frameIndex < bucketFrameStart.get(b)!) {
+      bucketFrameStart.set(b, f.frameIndex)
+    }
+    if (!isQtr) {
       const cur = bucketQClock.get(b)
       if (cur === undefined || f.quarterClock > cur) bucketQClock.set(b, f.quarterClock)
     }
   }
 
-  const currentBucket =
-    frames[currentFrame]?.shotClock !== null &&
-    frames[currentFrame]?.shotClock !== undefined &&
-    !isNaN(frames[currentFrame]!.shotClock!)
-      ? Math.floor(frames[currentFrame]!.shotClock!)
-      : null
+  const frame = frames[currentFrame]
+  const currentBucket: number | null = frame
+    ? getBucket(frame.quarterClock, frame.shotClock)
+    : null
 
-  // Auto-scroll so current bucket is visible
+  // Auto-scroll so current bucket column stays visible
   // eslint-disable-next-line react-hooks/rules-of-hooks
   useEffect(() => {
     if (!scrollRef.current || currentBucket === null) return
@@ -92,127 +115,137 @@ export default function AnnotationArea() {
   return (
     <div
       ref={scrollRef}
-      style={{
-        overflowX: 'auto',
-        overflowY: 'hidden',
-        background: 'var(--bg-page)',
-        userSelect: 'none',
-      }}
+      style={{ overflowX: 'auto', overflowY: 'hidden', background: 'var(--bg-page)', userSelect: 'none' }}
     >
-      <table
-        style={{
-          width: tableW,
-          minWidth: tableW,
-          borderCollapse: 'collapse',
-          tableLayout: 'fixed',
-        }}
-      >
+      <table style={{ width: tableW, minWidth: tableW, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
         <thead>
           <tr>
-            {/* Sticky label header */}
-            <th
-              style={{
-                position: 'sticky',
-                left: 0,
-                width: LABEL_W,
-                minWidth: LABEL_W,
-                background: 'var(--bg-panel)',
-                zIndex: 3,
-                borderBottom: '2px solid var(--border)',
-                borderRight: '1px solid var(--border)',
-                padding: '0 10px',
-                height: HEADER_H,
-                textAlign: 'left',
-                verticalAlign: 'bottom',
-              }}
-            >
-              <div style={{ fontSize: 11, color: '#5a7aaa', fontWeight: 600, letterSpacing: 0.5 }}>Shot</div>
-              <div style={{ fontSize: 10, color: '#3a4a5a', marginTop: 2 }}>Q-Clock</div>
+            {/* Label header */}
+            <th style={{
+              position: 'sticky', left: 0, width: LABEL_W, minWidth: LABEL_W,
+              background: 'var(--bg-panel)', zIndex: 3,
+              borderBottom: '2px solid var(--border)', borderRight: '1px solid var(--border)',
+              padding: '0 10px', height: HEADER_H, textAlign: 'left', verticalAlign: 'bottom',
+            }}>
+              {isQtr ? (
+                <>
+                  <div style={{ fontSize: 11, color: '#5a7aaa', fontWeight: 600 }}>Q-Clock</div>
+                  <div style={{ fontSize: 9,  color: '#3a4a5a', marginTop: 1 }}>frame start</div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: 11, color: '#5a7aaa', fontWeight: 600 }}>Shot</div>
+                  <div style={{ fontSize: 9,  color: '#3a4a5a', marginTop: 1 }}>Q-Clock</div>
+                  <div style={{ fontSize: 9,  color: '#3a4a5a', marginTop: 1 }}>frame</div>
+                </>
+              )}
             </th>
-            {/* Bucket headers — shot clock + quarter clock */}
+
+            {/* Bucket headers */}
             {buckets.map(b => {
-              const qc = bucketQClock.get(b)
               const isActive = b === currentBucket
+              const fStart   = bucketFrameStart.get(b)
               return (
-                <th
-                  key={b}
-                  style={{
-                    width: CELL_W,
-                    minWidth: CELL_W,
-                    height: HEADER_H,
-                    background: isActive ? 'var(--bg-col-active)' : 'var(--bg-surface)',
-                    borderBottom: `2px solid ${isActive ? '#4a7ae8' : 'var(--border)'}`,
-                    borderRight: '1px solid var(--border-dim)',
-                    textAlign: 'center',
-                    verticalAlign: 'middle',
-                    padding: '4px 0',
-                    transition: 'background 0.15s',
-                  }}
-                >
-                  {/* Shot clock second */}
-                  <div style={{
-                    fontSize: 15,
-                    fontWeight: 700,
-                    color: isActive ? '#4a90d9' : 'var(--text-3)',
-                    lineHeight: 1.1,
-                  }}>
-                    {b}
-                  </div>
-                  {/* Quarter clock */}
-                  <div style={{
-                    fontSize: 10,
-                    color: isActive ? '#4a7ac8' : 'var(--text-4)',
-                    marginTop: 3,
-                    fontVariantNumeric: 'tabular-nums',
-                  }}>
-                    {qc !== undefined ? fmtClock(qc) : '--:--'}
-                  </div>
+                <th key={b} style={{
+                  width: CELL_W, minWidth: CELL_W, height: HEADER_H,
+                  background: isActive ? 'var(--bg-col-active)' : 'var(--bg-surface)',
+                  borderBottom: `2px solid ${isActive ? '#4a7ae8' : 'var(--border)'}`,
+                  borderRight: '1px solid var(--border-dim)',
+                  textAlign: 'center', verticalAlign: 'middle',
+                  padding: '3px 0', transition: 'background 0.15s',
+                }}>
+                  {isQtr ? (
+                    <>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: isActive ? '#4a90d9' : 'var(--text-3)', lineHeight: 1.2 }}>
+                        {fmtClock(b)}
+                      </div>
+                      <div style={{ fontSize: 9, color: isActive ? '#3a6aaa' : 'var(--text-4)', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
+                        {fStart !== undefined ? `f${fStart}` : ''}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: isActive ? '#4a90d9' : 'var(--text-3)', lineHeight: 1.1 }}>
+                        {b}
+                      </div>
+                      <div style={{ fontSize: 9, color: isActive ? '#4a7ac8' : 'var(--text-4)', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
+                        {bucketQClock.get(b) !== undefined ? fmtClock(bucketQClock.get(b)!) : '--:--'}
+                      </div>
+                      <div style={{ fontSize: 9, color: isActive ? '#3a6aaa' : 'var(--text-4)', marginTop: 1, fontVariantNumeric: 'tabular-nums' }}>
+                        {fStart !== undefined ? `f${fStart}` : ''}
+                      </div>
+                    </>
+                  )}
                 </th>
               )
             })}
           </tr>
         </thead>
+
         <tbody>
-          {defTeam.players.map(player => (
+          {/* ── Dead time row ─────────────────────────────────────────── */}
+          <tr>
+            <td style={{
+              position: 'sticky', left: 0, width: LABEL_W, minWidth: LABEL_W,
+              height: DEAD_ROW_H, background: 'var(--bg-panel)', zIndex: 1,
+              borderBottom: '2px solid var(--border)', borderRight: '1px solid var(--border)',
+              padding: '0 10px',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 13 }}>⏸</span>
+                <span style={{ fontSize: 11, fontWeight: 600, color: '#8a6a3a' }}>Dead time</span>
+              </div>
+            </td>
+            {buckets.map(b => {
+              const isDead   = deadTimeBuckets.includes(b)
+              const isActive = b === currentBucket
+              return (
+                <td
+                  key={b}
+                  onClick={() => useStore.getState().toggleDeadTimeBucket(b)}
+                  title={isDead ? 'Dead time — click to mark live' : 'Live — click to mark dead time'}
+                  style={{
+                    width: CELL_W, minWidth: CELL_W, height: DEAD_ROW_H,
+                    textAlign: 'center', verticalAlign: 'middle',
+                    background: isDead ? '#3a2000' : (isActive ? 'var(--bg-col-active)' : 'transparent'),
+                    border: isActive ? '1px solid #2a4a7a' : `1px solid ${isDead ? '#7a4a00' : 'var(--border-dim)'}`,
+                    cursor: 'pointer',
+                    transition: 'background 0.1s',
+                  }}
+                >
+                  {isDead && (
+                    <span style={{ fontSize: 9, fontWeight: 700, color: '#c87a20' }}>DEAD</span>
+                  )}
+                </td>
+              )
+            })}
+          </tr>
+
+          {/* ── Defender rows ──────────────────────────────────────────── */}
+          {defPlayers.map(player => (
             <tr key={player.id}>
-              {/* Sticky defender label */}
-              <td
-                style={{
-                  position: 'sticky',
-                  left: 0,
-                  width: LABEL_W,
-                  minWidth: LABEL_W,
-                  height: ROW_H,
-                  background: 'var(--bg-panel)',
-                  zIndex: 1,
-                  borderBottom: '1px solid var(--border-dim)',
-                  borderRight: '1px solid var(--border)',
-                  padding: '0 10px',
-                }}
-              >
+              <td style={{
+                position: 'sticky', left: 0, width: LABEL_W, minWidth: LABEL_W,
+                height: ROW_H, background: 'var(--bg-panel)', zIndex: 1,
+                borderBottom: '1px solid var(--border-dim)', borderRight: '1px solid var(--border)',
+                padding: '0 10px',
+              }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                  <span style={{ color: COLOR_TEAM_A, fontWeight: 700, fontSize: 14 }}>
+                  <span style={{ color: defColor, fontWeight: 700, fontSize: 14 }}>
                     #{player.jersey}
                   </span>
-                  <span style={{
-                    color: 'var(--text-2)', fontSize: 12,
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }}>
+                  <span style={{ color: 'var(--text-2)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {player.name}
                   </span>
                 </div>
               </td>
 
-              {/* Annotation cells */}
               {buckets.map(b => {
-                const ann = cellAnnotations.find(
-                  c => c.defenderId === player.id && c.shotClockBucket === b
-                )
+                const ann      = cellAnnotations.find(c => c.defenderId === player.id && c.shotClockBucket === b)
                 const isActive = b === currentBucket
-                const isNone = ann?.attackerId === 'GUARD_NONE'
-                const attacker = ann && !isNone
-                  ? playerDict[ann.attackerId as number]
-                  : null
+                const isDead   = deadTimeBuckets.includes(b)
+                const isNone   = ann?.attackerId === 'GUARD_NONE'
+                const attacker = ann && !isNone ? playerDict[ann.attackerId as number] : null
 
                 return (
                   <td
@@ -222,27 +255,20 @@ export default function AnnotationArea() {
                     onDoubleClick={() => handleCellDblClick(player.id, b)}
                     title={ann ? 'Double-click to clear' : 'Drag attacker here'}
                     style={{
-                      width: CELL_W,
-                      minWidth: CELL_W,
-                      height: ROW_H,
-                      textAlign: 'center',
-                      verticalAlign: 'middle',
-                      background: ann
-                        ? (isActive ? 'var(--bg-cell-ann-act)' : (isNone ? 'var(--bg-cell-none)' : 'var(--bg-cell-ann)'))
-                        : (isActive ? 'var(--bg-cell-active)' : 'var(--bg-page)'),
-                      border: isActive ? '1px solid #2a4a7a' : '1px solid var(--border-dim)',
-                      cursor: 'default',
-                      transition: 'background 0.15s',
+                      width: CELL_W, minWidth: CELL_W, height: ROW_H,
+                      textAlign: 'center', verticalAlign: 'middle',
+                      background: isDead
+                        ? '#2a1800'
+                        : ann
+                          ? (isActive ? 'var(--bg-cell-ann-act)' : (isNone ? 'var(--bg-cell-none)' : 'var(--bg-cell-ann)'))
+                          : (isActive ? 'var(--bg-cell-active)' : 'var(--bg-page)'),
+                      border: isActive ? '1px solid #2a4a7a' : `1px solid ${isDead ? '#5a3a00' : 'var(--border-dim)'}`,
+                      cursor: 'default', transition: 'background 0.15s',
+                      opacity: isDead ? 0.5 : 1,
                     }}
                   >
                     {ann && (
-                      <span style={{
-                        fontSize: 13,
-                        fontWeight: 700,
-                        color: isNone ? '#666' : '#d4e8ff',
-                        display: 'inline-block',
-                        lineHeight: 1,
-                      }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: isNone ? '#666' : '#d4e8ff', display: 'inline-block', lineHeight: 1 }}>
                         {isNone ? '∅' : (attacker ? `#${attacker.jersey}` : '?')}
                       </span>
                     )}

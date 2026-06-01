@@ -27,10 +27,13 @@ function PlayerButton({
         userSelect: 'none',
       }}
     >
-      <span style={{ color, fontWeight: 700, fontSize: 16, minWidth: 28 }}>
+      <span style={{ color, fontWeight: 700, fontSize: 15, minWidth: 26, flexShrink: 0 }}>
         #{player.jersey}
       </span>
-      <span style={{ color: 'var(--text-2)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+      <span
+        title={player.name}
+        style={{ color: 'var(--text-2)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}
+      >
         {player.name}
       </span>
       {draggable && <span style={{ color: 'var(--text-4)', fontSize: 12 }}>⠿</span>}
@@ -39,26 +42,40 @@ function PlayerButton({
 }
 
 export default function RosterPanel() {
-  const possession = useStore(s => s.possession)
+  const possession      = useStore(s => s.possession)
+  const quarterMeta     = useStore(s => s.quarterMeta)
   const toggleDefendingTeam = useStore(s => s.toggleDefendingTeam)
+  const frames          = useStore(s => s.frames)
+  const currentFrame    = useStore(s => s.currentFrame)
 
-  if (!possession) {
+  const meta = possession ?? quarterMeta
+
+  if (!meta) {
     return (
-      <div style={{ width: 280, flexShrink: 0, background: 'var(--bg-panel)', padding: 12, color: 'var(--text-3)', fontSize: 13 }}>
-        No possession loaded
+      <div style={{ width: '100%', height: '100%', background: 'var(--bg-panel)', padding: 12, color: 'var(--text-3)', fontSize: 13 }}>
+        No data loaded
       </div>
     )
   }
 
-  const defTeam = possession.defendingTeamId === possession.teamA.teamId
-    ? possession.teamA
-    : possession.teamB
-  const attTeam = possession.defendingTeamId === possession.teamA.teamId
-    ? possession.teamB
-    : possession.teamA
+  const defTeam = meta.defendingTeamId === meta.teamA.teamId
+    ? meta.teamA
+    : meta.teamB
+  const attTeam = meta.defendingTeamId === meta.teamA.teamId
+    ? meta.teamB
+    : meta.teamA
+
+  // Colors follow the court: teamA always blue, teamB always red
+  const defColor = defTeam.teamId === meta.teamA.teamId ? COLOR_TEAM_A : COLOR_TEAM_B
+  const attColor = attTeam.teamId === meta.teamA.teamId ? COLOR_TEAM_A : COLOR_TEAM_B
+
+  // Only show players currently on the court
+  const onCourtIds = new Set((frames[currentFrame]?.players ?? []).map(p => p.id))
+  const defPlayers = defTeam.players.filter(p => onCourtIds.has(p.id))
+  const attPlayers = attTeam.players.filter(p => onCourtIds.has(p.id))
 
   return (
-    <div style={{ width: 280, flexShrink: 0, background: 'var(--bg-panel)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{ width: '100%', height: '100%', background: 'var(--bg-panel)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -82,11 +99,11 @@ export default function RosterPanel() {
           flex: 1, background: 'var(--bg-def)', padding: 8, overflowY: 'auto',
           borderRight: '1px solid var(--border)',
         }}>
-          <div style={{ fontSize: 11, color: COLOR_TEAM_A, fontWeight: 700, marginBottom: 6, textTransform: 'uppercase' }}>
+          <div style={{ fontSize: 11, color: defColor, fontWeight: 700, marginBottom: 6, textTransform: 'uppercase' }}>
             {defTeam.abbr} — Defense
           </div>
-          {defTeam.players.map(p => (
-            <PlayerButton key={p.id} player={p} draggable={false} color={COLOR_TEAM_A} />
+          {defPlayers.map(p => (
+            <PlayerButton key={p.id} player={p} draggable={false} color={defColor} />
           ))}
         </div>
 
@@ -94,11 +111,11 @@ export default function RosterPanel() {
         <div style={{
           flex: 1, background: 'var(--bg-att)', padding: 8, overflowY: 'auto',
         }}>
-          <div style={{ fontSize: 11, color: COLOR_TEAM_B, fontWeight: 700, marginBottom: 6, textTransform: 'uppercase' }}>
+          <div style={{ fontSize: 11, color: attColor, fontWeight: 700, marginBottom: 6, textTransform: 'uppercase' }}>
             {attTeam.abbr} — Offense
           </div>
-          {attTeam.players.map(p => (
-            <PlayerButton key={p.id} player={p} draggable={true} color={COLOR_TEAM_B} />
+          {attPlayers.map(p => (
+            <PlayerButton key={p.id} player={p} draggable={true} color={attColor} />
           ))}
 
           <div style={{ borderTop: '1px solid var(--border)', margin: '6px 0' }} />

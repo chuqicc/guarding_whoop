@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import UploadPage from './pages/UploadPage'
+import PossessionSetupPage from './pages/PossessionSetupPage'
+import QuarterSetupPage from './pages/QuarterSetupPage'
 import VideoSplitPage from './pages/VideoSplitPage'
 import TopBar from './components/TopBar'
 import VideoPanel from './components/VideoPanel'
@@ -18,10 +20,15 @@ const TOP_DEFAULT_H = 340
 const TOP_MIN_H = 150
 const TOP_MAX_H = 700
 
+const ROSTER_DEFAULT_W = 280
+const ROSTER_MIN_W = 140
+const ROSTER_MAX_W = 500
+
 export default function App() {
-  const [page, setPage] = useState<'upload' | 'annotate' | 'split'>('upload')
-  const [videoPx, setVideoPx] = useState(VIDEO_DEFAULT_W)
-  const [topPx, setTopPx] = useState(TOP_DEFAULT_H)
+  const [page, setPage] = useState<'home' | 'possession-setup' | 'possession' | 'quarter-setup' | 'quarter' | 'split'>('home')
+  const [videoPx,  setVideoPx]  = useState(VIDEO_DEFAULT_W)
+  const [topPx,    setTopPx]    = useState(TOP_DEFAULT_H)
+  const [rosterPx, setRosterPx] = useState(ROSTER_DEFAULT_W)
 
   const theme       = useStore(s => s.theme)
   const isPlaying   = useStore(s => s.isPlaying)
@@ -81,7 +88,14 @@ export default function App() {
       if (e.target instanceof HTMLInputElement) return
       if (e.code === 'Space') {
         e.preventDefault()
-        useStore.getState().setPlaying(!useStore.getState().isPlaying)
+        const { isPlaying, isVideoPlaying, setPlaying, setVideoPlaying } = useStore.getState()
+        if (isPlaying && isVideoPlaying) {
+          setPlaying(false); setVideoPlaying(false)         // both running → stop both
+        } else if (isPlaying || isVideoPlaying) {
+          setPlaying(false); setVideoPlaying(false)         // one running → stop all
+        } else {
+          setPlaying(true)                                  // nothing running → start animation
+        }
       }
       if (e.code === 'ArrowRight') {
         useStore.getState().setCurrentFrame(
@@ -118,6 +132,27 @@ export default function App() {
     window.addEventListener('mouseup', onUp)
   }
 
+  // ── Drag-to-resize roster panel (court ↔ roster) ────────────────────────
+  const rosterDrag = useRef<{ startX: number; startW: number } | null>(null)
+
+  const onRosterDividerMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault()
+    rosterDrag.current = { startX: e.clientX, startW: rosterPx }
+    const onMove = (ev: MouseEvent) => {
+      if (!rosterDrag.current) return
+      // dragging left increases roster width
+      const delta = rosterDrag.current.startX - ev.clientX
+      setRosterPx(Math.max(ROSTER_MIN_W, Math.min(ROSTER_MAX_W, rosterDrag.current.startW + delta)))
+    }
+    const onUp = () => {
+      rosterDrag.current = null
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
   // ── Drag-to-resize horizontal divider (top ↔ annotation area) ────────────
   const horizDrag = useRef<{ startY: number; startH: number } | null>(null)
 
@@ -139,11 +174,21 @@ export default function App() {
   }
 
   // ── Page routing ─────────────────────────────────────────────────────────
-  if (page === 'upload') {
-    return <UploadPage onStart={() => setPage('annotate')} onSplit={() => setPage('split')} />
+  if (page === 'home') {
+    return <UploadPage
+      onPossession={() => setPage('possession-setup')}
+      onQuarter={() => setPage('quarter-setup')}
+      onSplit={() => setPage('split')}
+    />
+  }
+  if (page === 'possession-setup') {
+    return <PossessionSetupPage onStart={() => setPage('possession')} onBack={() => setPage('home')} />
+  }
+  if (page === 'quarter-setup') {
+    return <QuarterSetupPage onStart={() => setPage('quarter')} onBack={() => setPage('home')} />
   }
   if (page === 'split') {
-    return <VideoSplitPage onBack={() => setPage('upload')} />
+    return <VideoSplitPage onBack={() => setPage('home')} />
   }
 
   // ── Annotate page ─────────────────────────────────────────────────────────
@@ -171,7 +216,7 @@ export default function App() {
         </div>
       )}
 
-      <TopBar onNewSession={() => setPage('upload')} />
+      <TopBar onNewSession={() => setPage('home')} />
 
       {/* Top row: [Video | divider | Court | Roster] */}
       <div style={{ display: 'flex', flexShrink: 0, height: topPx, minHeight: 0 }}>
@@ -203,8 +248,24 @@ export default function App() {
           <PlaybackControls />
         </div>
 
-        {/* Roster — fixed width */}
-        <RosterPanel />
+        {/* Drag handle between court and roster */}
+        <div
+          onMouseDown={onRosterDividerMouseDown}
+          title="Drag to resize roster"
+          style={{
+            width: 6, flexShrink: 0, background: 'var(--bg-surface)',
+            borderLeft: '1px solid var(--border)', borderRight: '1px solid var(--border)',
+            cursor: 'col-resize', display: 'flex', alignItems: 'center',
+            justifyContent: 'center', userSelect: 'none', zIndex: 10,
+          }}
+        >
+          <span style={{ color: '#333', fontSize: 10, writingMode: 'vertical-rl', letterSpacing: 2 }}>⠿</span>
+        </div>
+
+        {/* Roster — resizable */}
+        <div style={{ width: rosterPx, flexShrink: 0, overflow: 'hidden' }}>
+          <RosterPanel />
+        </div>
       </div>
 
       {/* Horizontal drag handle between top section and annotation area */}

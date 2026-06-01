@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { Stage, Layer, Image as KonvaImage, Circle, Text, Arrow } from 'react-konva'
 import { useStore } from '../store/useStore'
-import { COURT_W, COURT_H, COLOR_TEAM_A, COLOR_TEAM_B, COLOR_BALL } from '../constants'
+import { COURT_W, COURT_H, COLOR_TEAM_A, COLOR_TEAM_B, COLOR_BALL, QUARTER_BUCKET_S } from '../constants'
 import courtPng from '../assets/court.png'
 
 const COURT_ASPECT = COURT_W / COURT_H   // 94 / 50 = 1.88
@@ -48,6 +48,11 @@ export default function CourtCanvas() {
   const flipY           = useStore(s => s.flipY)
   const toggleFlipX     = useStore(s => s.toggleFlipX)
   const toggleFlipY     = useStore(s => s.toggleFlipY)
+  const possession      = useStore(s => s.possession)
+  const quarterMeta     = useStore(s => s.quarterMeta)
+  const mode            = useStore(s => s.mode)
+
+  const meta = possession ?? quarterMeta
 
   useEffect(() => {
     const img = new window.Image()
@@ -69,9 +74,11 @@ export default function CourtCanvas() {
   const { w: stageW, h: stageH, offsetX, offsetY } = fitStage(containerSize.w, containerSize.h)
 
   const frame = frames[currentFrame]
-  const currentBucket = frame?.shotClock !== null && frame?.shotClock !== undefined && !isNaN(frame.shotClock)
-    ? Math.floor(frame.shotClock)
-    : null
+  const currentBucket = mode === 'quarter'
+    ? (frame ? Math.floor(frame.quarterClock / QUARTER_BUCKET_S) * QUARTER_BUCKET_S : null)
+    : (frame?.shotClock !== null && frame?.shotClock !== undefined && !isNaN(frame.shotClock)
+        ? Math.floor(frame.shotClock)
+        : null)
 
   const activePairs = currentBucket !== null
     ? cellAnnotations.filter(c => c.shotClockBucket === currentBucket)
@@ -139,7 +146,7 @@ export default function CourtCanvas() {
           <Layer listening={false}>
             {frame && frame.players.map((p, idx) => {
               const { cx, cy } = toCanvas(p.x, p.y, stageW, stageH, flipX, flipY)
-              const isTeamA = idx < 5
+              const isTeamA = meta ? p.teamId === meta.teamA.teamId : idx < 5
               const color = isTeamA ? COLOR_TEAM_A : COLOR_TEAM_B
               const jersey = playerDict[p.id]?.jersey ?? String(p.id)
 

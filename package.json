@@ -94,8 +94,7 @@
             "x64"
           ]
         }
-      ],
-      "icon": "electron/icon.ico"
+      ]
     },
     "nsis": {
       "oneClick": false,
@@ -104,7 +103,9 @@
       "createStartMenuShortcut": true
     },
     "publish": {
-      "provider": "github"
+      "provider": "github",
+      "owner": "chuqicc",
+      "repo": "guarding_whoop"
     }
   }
 }

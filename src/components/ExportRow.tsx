@@ -1,17 +1,18 @@
 import { useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
 import type { CellAnnotation } from '../store/useStore'
-import { exportJSON, exportCSV } from '../utils/export'
+import { exportJSON, exportFrameCSV } from '../utils/export'
 
 interface Props {
   onNewSession: () => void
 }
 
 export default function ExportRow({ onNewSession }: Props) {
-  const possession       = useStore(s => s.possession)
-  const frames           = useStore(s => s.frames)
-  const cellAnnotations  = useStore(s => s.cellAnnotations)
-  const playerDict       = useStore(s => s.playerDict)
+  const possession        = useStore(s => s.possession)
+  const frames            = useStore(s => s.frames)
+  const cellAnnotations   = useStore(s => s.cellAnnotations)
+  const deadTimeBuckets   = useStore(s => s.deadTimeBuckets)
+  const playerDict        = useStore(s => s.playerDict)
   const setCellAnnotations = useStore(s => s.setCellAnnotations)
   const loadPossession   = useStore(s => s.loadPossession)
 
@@ -92,12 +93,12 @@ export default function ExportRow({ onNewSession }: Props) {
 
       {/* Export buttons */}
       <button disabled={!canExport}
-        onClick={() => possession && exportJSON(cellAnnotations, frames, possession, playerDict)}
+        onClick={() => possession && exportJSON(cellAnnotations, deadTimeBuckets, frames, possession, playerDict)}
         style={actionBtnStyle(canExport)}>
         ⬇ JSON
       </button>
       <button disabled={!canExport}
-        onClick={() => possession && exportCSV(cellAnnotations, frames, possession, playerDict)}
+        onClick={() => possession && exportFrameCSV(cellAnnotations, deadTimeBuckets, frames, possession, playerDict)}
         style={actionBtnStyle(canExport)}>
         ⬇ CSV
       </button>

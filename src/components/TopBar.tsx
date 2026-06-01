@@ -2,38 +2,44 @@ import { useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
 import type { CellAnnotation } from '../store/useStore'
 
-import { exportJSON, exportCSV } from '../utils/export'
+import { exportJSON, exportFrameCSV } from '../utils/export'
 
 interface Props {
   onNewSession: () => void
 }
 
 export default function TopBar({ onNewSession }: Props) {
-  const theme             = useStore(s => s.theme)
-  const toggleTheme       = useStore(s => s.toggleTheme)
-  const possession        = useStore(s => s.possession)
-  const frames            = useStore(s => s.frames)
-  const currentFrame      = useStore(s => s.currentFrame)
-  const cellAnnotations   = useStore(s => s.cellAnnotations)
-  const playerDict        = useStore(s => s.playerDict)
+  const theme              = useStore(s => s.theme)
+  const toggleTheme        = useStore(s => s.toggleTheme)
+  const possession         = useStore(s => s.possession)
+  const quarterMeta        = useStore(s => s.quarterMeta)
+  const mode               = useStore(s => s.mode)
+  const frames             = useStore(s => s.frames)
+  const currentFrame       = useStore(s => s.currentFrame)
+  const cellAnnotations    = useStore(s => s.cellAnnotations)
+  const deadTimeBuckets    = useStore(s => s.deadTimeBuckets)
+  const playerDict         = useStore(s => s.playerDict)
   const setCellAnnotations = useStore(s => s.setCellAnnotations)
-  const loadPossession    = useStore(s => s.loadPossession)
+  const loadPossession     = useStore(s => s.loadPossession)
+  const loadQuarter        = useStore(s => s.loadQuarter)
 
   const [error, setError] = useState<string | null>(null)
   const importRef         = useRef<HTMLInputElement>(null)
   const swapRef           = useRef<HTMLInputElement>(null)
 
+  const meta = possession ?? quarterMeta
+
   const frame     = frames[currentFrame]
   const shotClock = frame?.shotClock ?? null
 
-  const defTeam = possession
-    ? (possession.defendingTeamId === possession.teamA.teamId ? possession.teamA.abbr : possession.teamB.abbr)
+  const defTeam = meta
+    ? (meta.defendingTeamId === meta.teamA.teamId ? meta.teamA.abbr : meta.teamB.abbr)
     : null
-  const attTeam = possession
-    ? (possession.defendingTeamId === possession.teamA.teamId ? possession.teamB.abbr : possession.teamA.abbr)
+  const attTeam = meta
+    ? (meta.defendingTeamId === meta.teamA.teamId ? meta.teamB.abbr : meta.teamA.abbr)
     : null
 
-  const canExport = !!possession && cellAnnotations.length > 0
+  const canExport = !!meta  // allow export whenever tracking data is loaded
 
   const readFile = (file: File): Promise<string> =>
     new Promise((res, rej) => {
@@ -43,9 +49,13 @@ export default function TopBar({ onNewSession }: Props) {
       r.readAsText(file)
     })
 
-  const handleSwapPossession = async (file: File) => {
+  const handleSwap = async (file: File) => {
     try {
-      loadPossession(await readFile(file), file.name)
+      if (mode === 'quarter') {
+        loadQuarter(await readFile(file), file.name)
+      } else {
+        loadPossession(await readFile(file), file.name)
+      }
       setError(null)
     } catch (e) { setError(`Failed to load: ${e}`) }
   }
@@ -69,6 +79,16 @@ export default function TopBar({ onNewSession }: Props) {
     onDrop:     (e: React.DragEvent) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handler(f) },
   })
 
+  const handleExportJSON = () => {
+    if (!meta) return
+    exportJSON(cellAnnotations, deadTimeBuckets, frames, meta, playerDict)
+  }
+
+  const handleExportFrameCSV = () => {
+    if (!meta) return
+    exportFrameCSV(cellAnnotations, deadTimeBuckets, frames, meta, playerDict)
+  }
+
   return (
     <div style={{
       height: 40, background: 'var(--bg-panel)', display: 'flex', alignItems: 'center',
@@ -77,38 +97,44 @@ export default function TopBar({ onNewSession }: Props) {
     }}>
 
       {/* ── Left: navigation ── */}
-      <button onClick={onNewSession} style={btnStyle(false)} title="Back to upload page">
-        ← Upload
+      <button onClick={onNewSession} style={btnStyle(false)} title="Back to home">
+        ← Home
       </button>
+
+      <span style={{ fontSize: 12, color: 'var(--text-3)', fontWeight: 600, letterSpacing: '0.03em' }}>
+        {mode === 'quarter' ? 'Annotate Quarter' : 'Annotate Ball Possession'}
+      </span>
 
       <div style={divider} />
 
-      {/* ── Centre: possession info ── */}
-      {possession ? (
+      {/* ── Centre: data info ── */}
+      {meta ? (
         <>
           <span style={{ color: '#aaa', fontSize: 12 }}>
-            Game <strong style={{ color: '#ddd' }}>{possession.gameId}</strong>
+            Game <strong style={{ color: '#ddd' }}>{meta.gameId}</strong>
           </span>
           <span style={{ color: '#aaa', fontSize: 12 }}>
-            Q<strong style={{ color: '#ddd' }}>{possession.quarter}</strong>
+            Q<strong style={{ color: '#ddd' }}>{meta.quarter}</strong>
           </span>
-          <span style={{ color: '#aaa', fontSize: 12 }}>
-            Poss <strong style={{ color: '#ddd' }}>#{possession.possessionIndex}</strong>
-          </span>
+          {possession && (
+            <span style={{ color: '#aaa', fontSize: 12 }}>
+              Poss <strong style={{ color: '#ddd' }}>#{possession.possessionIndex}</strong>
+            </span>
+          )}
           <span style={{ fontSize: 12 }}>
             <strong style={{ color: '#4a90d9' }}>{defTeam}</strong>
             <span style={{ color: '#555' }}> DEF vs </span>
             <strong style={{ color: '#e05c5c' }}>{attTeam}</strong>
             <span style={{ color: '#555' }}> ATT</span>
           </span>
-          {shotClock !== null && (
+          {shotClock !== null && mode !== 'quarter' && (
             <span style={{ fontSize: 12, color: shotClock <= 5 ? '#e05c5c' : '#666' }}>
               Shot <strong style={{ color: shotClock <= 5 ? '#e05c5c' : '#aaa' }}>{shotClock.toFixed(1)}</strong>
             </span>
           )}
         </>
       ) : (
-        <span style={{ color: '#444', fontSize: 12 }}>No possession loaded</span>
+        <span style={{ color: '#444', fontSize: 12 }}>No data loaded</span>
       )}
 
       {/* ── Right: file actions ── */}
@@ -137,11 +163,14 @@ export default function TopBar({ onNewSession }: Props) {
 
         <div style={divider} />
 
-        {/* Swap possession CSV */}
-        <label {...makeDrop(handleSwapPossession)} style={btnStyle(false)} title="Load a different possession CSV">
-          📂 Swap possession
-          <input ref={swapRef} type="file" accept=".csv" style={{ display: 'none' }}
-            onChange={e => { if (e.target.files?.[0]) handleSwapPossession(e.target.files[0]) }} />
+        {/* Swap file */}
+        <label {...makeDrop(handleSwap)} style={btnStyle(false)}
+          title={mode === 'quarter' ? 'Load a different quarter JSON' : 'Load a different possession CSV'}>
+          📂 {mode === 'quarter' ? 'Swap quarter' : 'Swap possession'}
+          <input ref={swapRef} type="file"
+            accept={mode === 'quarter' ? '.json' : '.csv'}
+            style={{ display: 'none' }}
+            onChange={e => { if (e.target.files?.[0]) handleSwap(e.target.files[0]) }} />
         </label>
 
         <div style={divider} />
@@ -156,19 +185,19 @@ export default function TopBar({ onNewSession }: Props) {
         {/* Export JSON */}
         <button
           disabled={!canExport}
-          onClick={() => possession && exportJSON(cellAnnotations, frames, possession, playerDict)}
+          onClick={handleExportJSON}
           style={btnStyle(canExport)}
           title="Export annotations as JSON"
         >
           ⬇ JSON
         </button>
 
-        {/* Export CSV */}
+        {/* Export per-frame CSV (main export format) */}
         <button
           disabled={!canExport}
-          onClick={() => possession && exportCSV(cellAnnotations, frames, possession, playerDict)}
+          onClick={handleExportFrameCSV}
           style={btnStyle(canExport)}
-          title="Export annotations as CSV"
+          title="Export per-frame annotations: game_id, frame, moment_id, defender/attacker, gamestatus…"
         >
           ⬇ CSV
         </button>
