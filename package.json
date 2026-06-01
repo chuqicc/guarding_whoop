@@ -1,0 +1,110 @@
+{
+  "name": "basketball-annotation",
+  "productName": "NBA Guard Annotation",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "main": "electron/main.mjs",
+  "scripts": {
+    "dev": "concurrently -n VITE,SERVER -c cyan,green \"vite\" \"node server.mjs\"",
+    "server": "node server.mjs",
+    "build": "tsc -b && vite build",
+    "build:prod": "tsc -b && cross-env VITE_BASE_PATH=/ vite build",
+    "start": "NODE_ENV=production node server.mjs",
+    "electron:dev": "concurrently -n VITE,SERVER,ELECTRON -c cyan,green,yellow \"vite\" \"node server.mjs\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:dist": "npm run build:prod && electron-builder --win",
+    "electron:dist:publish": "npm run build:prod && electron-builder --win --publish always",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d dist"
+  },
+  "dependencies": {
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
+    "@tailwindcss/vite": "^4.3.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "ffmpeg-static": "^5.3.0",
+    "konva": "^10.3.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "react-konva": "^19.2.4",
+    "tailwindcss": "^4.3.0",
+    "uuid": "^14.0.0",
+    "zustand": "^5.0.13"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.12.3",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@types/uuid": "^10.0.0",
+    "@vitejs/plugin-react": "^6.0.1",
+    "concurrently": "^9.2.1",
+    "cross-env": "^7.0.3",
+    "electron": "^42.3.0",
+    "electron-builder": "^26.8.1",
+    "eslint": "^10.3.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "gh-pages": "^6.3.0",
+    "globals": "^17.6.0",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.59.2",
+    "vite": "^8.0.12",
+    "wait-on": "^8.0.5"
+  },
+  "build": {
+    "appId": "com.nba.guard-annotation",
+    "productName": "NBA Guard Annotation",
+    "copyright": "Copyright © 2026",
+    "directories": {
+      "output": "dist_electron"
+    },
+    "files": [
+      "electron/**",
+      "server.mjs",
+      "package.json",
+      "node_modules/**",
+      "!node_modules/.cache/**",
+      "!node_modules/.vite/**",
+      "!dist/**"
+    ],
+    "extraResources": [
+      {
+        "from": "dist",
+        "to": "dist"
+      }
+    ],
+    "asarUnpack": [
+      "**/node_modules/ffmpeg-static/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "electron/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "publish": {
+      "provider": "github"
+    }
+  }
+}

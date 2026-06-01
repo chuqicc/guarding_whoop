@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+/* ── Theme variables ──────────────────────────────────────────────────────── */
+:root {
+  /* Backgrounds */
+  --bg-page:        #0f1117;
+  --bg-panel:       #1a1d27;
+  --bg-surface:     #1e2030;
+  --bg-inter:       #252830;
+  --bg-input:       #1e212c;
+  --bg-video:       #0d0f18;
+  --bg-cell:        #111;
+
+  /* Team panels */
+  --bg-def:         #1e3254;
+  --bg-att:         #3a1e1e;
+  --border-def:     #2e4a7a;
+  --border-att:     #6a2e2e;
+
+  /* Annotation grid cells */
+  --bg-col-active:    #1e3254;
+  --bg-cell-ann:      #1a2a3a;
+  --bg-cell-active:   #111d2e;
+  --bg-cell-ann-act:  #1e3a6e;
+  --bg-cell-none:     #252525;
+
+  /* Borders */
+  --border:         #2a2d3a;
+  --border-dim:     #1a1e28;
+
+  /* Text */
+  --text-1:         #ddd;
+  --text-2:         #aaa;
+  --text-3:         #666;
+  --text-4:         #444;
+}
+
+:root[data-theme="light"] {
+  --bg-page:        #f0f2f7;
+  --bg-panel:       #ffffff;
+  --bg-surface:     #e8ebf2;
+  --bg-inter:       #dde1ec;
+  --bg-input:       #f0f2f7;
+  --bg-video:       #e4e8f0;
+  --bg-cell:        #f5f6fa;
+
+  --bg-def:         #dce8f8;
+  --bg-att:         #f8e0e0;
+  --border-def:     #90b8e8;
+  --border-att:     #e8a0a0;
+
+  --bg-col-active:  #c8d8f5;
+  --bg-cell-ann:    #bcd0e8;
+  --bg-cell-active: #cce0f5;
+  --bg-cell-ann-act:#98bce0;
+  --bg-cell-none:   #e0e0e0;
+
+  --border:         #c8ccd8;
+  --border-dim:     #dde0ea;
+
+  --text-1:         #1a1d2a;
+  --text-2:         #4a5568;
+  --text-3:         #718096;
+  --text-4:         #a0aec0;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-page);
+  color: var(--text-1);
+  font-family: sans-serif;
+}
+* { box-sizing: border-box; }

@@ -1,0 +1,36 @@
+name: Build & Release Windows App
+
+on:
+  push:
+    tags:
+      - 'v*'          # triggers on v1.0.0, v1.2.3, etc.
+
+defaults:
+  run:
+    working-directory: basketball-annotation   # remove this line if repo root IS the project
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: basketball-annotation/package-lock.json   # remove if repo root
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend (production)
+        run: npm run build:prod
+
+      - name: Package Windows app & publish to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --win --publish always
