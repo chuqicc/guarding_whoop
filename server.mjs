@@ -20,11 +20,15 @@ const PORT      = process.env.PORT || 3001
 const TEMP_DIR  = join(tmpdir(), 'nba-video-split')
 await mkdir(TEMP_DIR, { recursive: true })
 
-if (!ffmpegPath) {
+// In a packaged Electron app, ffmpeg-static resolves to app.asar which can't
+// be spawned. The asarUnpack config copies it to app.asar.unpacked — remap.
+const actualFfmpegPath = ffmpegPath?.replace('app.asar', 'app.asar.unpacked') ?? null
+
+if (!actualFfmpegPath) {
   console.error('❌  ffmpeg-static could not locate an FFmpeg binary for this platform.')
   process.exit(1)
 }
-console.log(`✓  FFmpeg: ${ffmpegPath}`)
+console.log(`✓  FFmpeg: ${actualFfmpegPath}`)
 
 const app = express()
 app.use(cors())
@@ -113,7 +117,7 @@ app.post('/api/split', express.json(), async (req, res) => {
         '-y', outPath,
       ]
       console.log(`  ✂  ${q.label}: ffmpeg -ss ${q.startStr} -to ${q.endStr}`)
-      const proc = spawn(ffmpegPath, args)
+      const proc = spawn(actualFfmpegPath, args)
 
       let totalSec  = 0
       proc.stderr.on('data', chunk => {
