@@ -19,7 +19,7 @@ interface Props {
   onSplit:      () => void
 }
 
-export default function UploadPage({ onPossession, onQuarter, onSplit }: Props) {
+export default function UploadPage({ onPossession:_onPossession, onQuarter, onSplit }: Props) {
   const loadPlayerDict = useStore(s => s.loadPlayerDict)
   const playerDict     = useStore(s => s.playerDict)
   const theme          = useStore(s => s.theme)
