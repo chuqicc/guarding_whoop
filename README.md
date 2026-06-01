@@ -1,73 +1,80 @@
-# React + TypeScript + Vite
+# NBA Guard Annotation Tool
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A desktop application for annotating defensive assignments in NBA games using SportVU player-tracking data.
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Download
 
-## React Compiler
+Get the latest Windows installer from the [Releases](../../releases) page.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+---
 
-## Expanding the ESLint configuration
+## Features
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### Annotate Quarter
+Load a full-quarter SportVU tracking JSON file and annotate every defender's assignment frame by frame.
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+- Animated court view shows all 10 players moving in real time
+- Assign each on-court defender to the attacker they are guarding
+- 1-second time buckets — one annotation covers an entire second of play
+- Mark dead-ball periods (out of bounds, free throws, timeouts) to exclude them from analysis
+- Sync a game video alongside the tracking animation for reference
+- Export results as CSV or JSON, keyed by frame and moment ID for direct join with tracking data
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+### Video Quarter Splitter
+Split a full-game video file into individual quarter clips.
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+- Drop in any video file (mp4, mov, mkv, …)
+- Set start and end timestamps by playing the video and clicking **Set**
+- Split and download all quarters in one click using FFmpeg under the hood
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+---
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## How to Use
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+### Annotate Quarter — basic workflow
+
+1. Launch the app and click **Annotate Quarter**
+2. Drop your SportVU quarter JSON file onto the upload area
+3. Optionally load a video file for side-by-side reference
+4. Use the court animation to navigate frames
+5. Click a defender row in the roster, then click the attacker they are guarding in the assignment table
+6. Mark any dead-ball seconds using the **Dead** toggle in the annotation table
+7. Click **⬇ CSV** or **⬇ JSON** to export when done
+
+### Video Quarter Splitter — basic workflow
+
+1. Launch the app and click **Video Quarter Splitter**
+2. Drop your full-game video onto the player area
+3. Click **Upload** to send the file to the local split server
+4. Play the video to each quarter boundary and click **⊙ Set** to mark start and end times
+5. Click **✂ Split & Download** — each quarter downloads automatically when ready
+
+---
+
+## Export Format
+
+**CSV** — one row per frame per on-court defender:
+
+| Field | Description |
+|---|---|
+| `game_id` | NBA game identifier |
+| `quarter` | Quarter number |
+| `frame` | Frame index in the tracking data |
+| `moment_id` | SportVU moment timestamp (links back to raw tracking) |
+| `gamestatus` | `active` or `dead` |
+| `defending_team` / `attacking_team` | Team abbreviations |
+| `defender_jersey` / `defender_id` / `defender_name` | Defending player |
+| `attacker_jersey` / `attacker_id` / `attacker_name` | Assigned attacker (`GUARD_NONE` if unguarded) |
+| `quarter_clock` / `shot_clock` | Clock values at this frame |
+
+**JSON** — same data in a nested structure: one metadata block + an array of frame objects each containing an `assignments` array.
+
+---
+
+## Notes
+
+- All annotation data is auto-saved in the browser's local storage — you can close and reopen the app without losing progress
+- The video sync feature supports multiple sync points to handle dead-ball gaps in the tracking data
+- Windows SmartScreen may show a warning on first launch — click **More info → Run anyway**
