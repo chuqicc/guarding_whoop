@@ -171,7 +171,7 @@ app.get('/api/download/:key', async (req, res) => {
 // ── SPA fallback (must be after all /api routes) ───────────────────────────
 if (process.env.NODE_ENV === 'production') {
   const distDir = process.env.DIST_DIR ?? join(__dirname, 'dist')
-  app.get('*', (_req, res) => {
+  app.get('/{*splat}', (_req, res) => {
     res.sendFile(join(distDir, 'index.html'))
   })
 }
