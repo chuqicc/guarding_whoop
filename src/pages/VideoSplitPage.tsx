@@ -301,10 +301,10 @@ export default function VideoSplitPage({ onBack }: { onBack: () => void }) {
       </div>
 
       {/* ── Body ── */}
-      <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'auto', gap:0 }}>
+      <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', gap:0 }}>
 
         {/* ── Video drop / player ── */}
-        <div style={{ background:'var(--bg-video)', borderBottom:'1px solid var(--border)', height: videoPx, flexShrink:0, position:'relative', display:'flex', flexDirection:'column' }}>
+        <div style={{ background:'var(--bg-video)', height: videoPx, flexShrink:0, display:'flex', flexDirection:'column' }}>
           {videoUrl ? (
             <>
               <video ref={videoRef} src={videoUrl} controls={false}
@@ -347,21 +347,27 @@ export default function VideoSplitPage({ onBack }: { onBack: () => void }) {
                 onChange={e => { if(e.target.files?.[0]) loadFile(e.target.files[0]) }} />
             </label>
           )}
-
-          {/* ── Resize handle ── */}
-          <div
-            onMouseDown={onVideoDividerMouseDown}
-            title="Drag to resize video panel"
-            style={{
-              position: 'absolute', bottom: 0, left: 0, right: 0,
-              height: 6, cursor: 'row-resize', zIndex: 10,
-              background: 'transparent',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}
-          >
-            <div style={{ width: 48, height: 3, borderRadius: 2, background: 'var(--border)' }} />
-          </div>
         </div>
+
+        {/* ── Drag handle ── */}
+        <div
+          onMouseDown={onVideoDividerMouseDown}
+          title="Drag to resize video"
+          style={{
+            height: 6, flexShrink: 0,
+            background: 'var(--bg-surface)',
+            borderTop: '1px solid var(--border)',
+            borderBottom: '1px solid var(--border)',
+            cursor: 'row-resize',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            userSelect: 'none', zIndex: 10,
+          }}
+        >
+          <span style={{ color: '#333', fontSize: 10, letterSpacing: 4 }}>⠿</span>
+        </div>
+
+        {/* ── Scrollable content below video ── */}
+        <div style={{ flex:1, overflowY:'auto' }}>
 
         {/* ── Upload to server ── */}
         {videoFile && (
@@ -523,6 +529,7 @@ export default function VideoSplitPage({ onBack }: { onBack: () => void }) {
             </details>
           )}
         </div>
+        </div>{/* end scrollable content */}
       </div>
     </div>
   )
