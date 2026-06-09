@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Stage, Layer, Image as KonvaImage, Circle, Text, Arrow } from 'react-konva'
+import { Stage, Layer, Image as KonvaImage, Circle, Text, Arrow, Group } from 'react-konva'
 import { useStore } from '../store/useStore'
 import { COURT_W, COURT_H, COLOR_TEAM_A, COLOR_TEAM_B, COLOR_BALL, QUARTER_BUCKET_S } from '../constants'
 import courtPng from '../assets/court.png'
@@ -18,13 +18,8 @@ function fitStage(containerW: number, containerH: number) {
   }
 }
 
-// Map court feet → stage pixels.
-// flipX: mirror left↔right  (new_x = COURT_W - x)
-// flipY: mirror top↔bottom  (inverts the existing y-flip, so y=0 appears at top)
 function toCanvas(courtX: number, courtY: number, stageW: number, stageH: number, flipX: boolean, flipY: boolean) {
   const x = flipX ? COURT_W - courtX : courtX
-  // Normal canvas y: cy = (1 - courtY/H) * stageH  (court y=0 → bottom of canvas)
-  // FlipY canvas y:  cy = (courtY/H) * stageH       (court y=0 → top of canvas)
   const cy = flipY
     ? (courtY / COURT_H) * stageH
     : (1 - courtY / COURT_H) * stageH
@@ -40,17 +35,23 @@ export default function CourtCanvas() {
   const [containerSize, setContainerSize] = useState({ w: 600, h: 288 })
   const [courtImg, setCourtImg] = useState<HTMLImageElement | null>(null)
 
-  const frames          = useStore(s => s.frames)
-  const currentFrame    = useStore(s => s.currentFrame)
-  const cellAnnotations = useStore(s => s.cellAnnotations)
-  const playerDict      = useStore(s => s.playerDict)
-  const flipX           = useStore(s => s.flipX)
-  const flipY           = useStore(s => s.flipY)
-  const toggleFlipX     = useStore(s => s.toggleFlipX)
-  const toggleFlipY     = useStore(s => s.toggleFlipY)
-  const possession      = useStore(s => s.possession)
-  const quarterMeta     = useStore(s => s.quarterMeta)
-  const mode            = useStore(s => s.mode)
+  // click-to-assign state
+  const [selectedDefId, setSelectedDefId] = useState<number | null>(null)
+  const [hoveredId,     setHoveredId]     = useState<number | null>(null)
+
+  const frames             = useStore(s => s.frames)
+  const currentFrame       = useStore(s => s.currentFrame)
+  const cellAnnotations    = useStore(s => s.cellAnnotations)
+  const playerDict         = useStore(s => s.playerDict)
+  const flipX              = useStore(s => s.flipX)
+  const flipY              = useStore(s => s.flipY)
+  const toggleFlipX        = useStore(s => s.toggleFlipX)
+  const toggleFlipY        = useStore(s => s.toggleFlipY)
+  const possession         = useStore(s => s.possession)
+  const quarterMeta        = useStore(s => s.quarterMeta)
+  const mode               = useStore(s => s.mode)
+  const setCellAnnotation       = useStore(s => s.setCellAnnotation)
+  const signalCourtAssignment   = useStore(s => s.signalCourtAssignment)
 
   const meta = possession ?? quarterMeta
 
@@ -69,6 +70,13 @@ export default function CourtCanvas() {
     })
     obs.observe(el)
     return () => obs.disconnect()
+  }, [])
+
+  // Escape clears selection
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelectedDefId(null) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
   }, [])
 
   const { w: stageW, h: stageH, offsetX, offsetY } = fitStage(containerSize.w, containerSize.h)
@@ -93,12 +101,46 @@ export default function CourtCanvas() {
 
   const playerR = scaleFt(1.2, stageW)
 
+  const isDefenderFn = (teamId: number) =>
+    meta ? teamId === meta.defendingTeamId : false
+
+  // ── Click handlers ─────────────────────────────────────────────────────────
+  const handleClick = (playerId: number, playerTeamId: number) => {
+    if (currentBucket === null) return
+    const defending = isDefenderFn(playerTeamId)
+    if (defending) {
+      // Toggle selection on defenders
+      setSelectedDefId(prev => prev === playerId ? null : playerId)
+    } else if (selectedDefId !== null) {
+      // Assign: selected defender → clicked attacker
+      setCellAnnotation(selectedDefId, playerId, currentBucket)
+      signalCourtAssignment(selectedDefId, playerId)
+      setSelectedDefId(null)
+    }
+  }
+
+  const handleDblClick = (playerId: number, playerTeamId: number) => {
+    if (currentBucket === null) return
+    if (!isDefenderFn(playerTeamId)) return
+    // Double-click defender → GUARD_NONE
+    setCellAnnotation(playerId, 'GUARD_NONE', currentBucket)
+    setSelectedDefId(null)
+  }
+
+  // Is the hovered node an attacker (for preview arrow)?
+  const hoveredIsAttacker = hoveredId !== null && frame
+    ? (() => {
+        const hp = frame.players.find(p => p.id === hoveredId)
+        return hp ? !isDefenderFn(hp.teamId) : false
+      })()
+    : false
+
   return (
     <div
       ref={containerRef}
       style={{ flex: 1, height: '100%', overflow: 'hidden', position: 'relative', background: 'var(--bg-cell)' }}
     >
-      {/* Flip buttons — top-right corner, inside the court stage area */}
+      {/* Flip buttons */}
       <div style={{
         position: 'absolute',
         top: offsetY + 5,
@@ -106,32 +148,34 @@ export default function CourtCanvas() {
         zIndex: 20,
         display: 'flex', gap: 3,
       }}>
-        <button
-          onClick={toggleFlipX}
-          title={flipX ? 'Undo left↔right flip' : 'Flip left↔right'}
-          style={flipBtnStyle(flipX)}
-        >
-          ⇆
-        </button>
-        <button
-          onClick={toggleFlipY}
-          title={flipY ? 'Undo top↔bottom flip' : 'Flip top↔bottom'}
-          style={flipBtnStyle(flipY)}
-        >
-          ⇅
-        </button>
+        <button onClick={toggleFlipX} title={flipX ? 'Undo left↔right flip' : 'Flip left↔right'} style={flipBtnStyle(flipX)}>⇆</button>
+        <button onClick={toggleFlipY} title={flipY ? 'Undo top↔bottom flip' : 'Flip top↔bottom'} style={flipBtnStyle(flipY)}>⇅</button>
       </div>
 
-      {/* Konva stage centered in container */}
-      <div style={{ position: 'absolute', left: offsetX, top: offsetY }}>
+      {/* Selection hint */}
+      {selectedDefId !== null && (
+        <div style={{
+          position: 'absolute', bottom: offsetY + 6, left: offsetX + 8,
+          zIndex: 20, fontSize: 11, color: '#fff',
+          background: 'rgba(74,144,217,0.75)', borderRadius: 4, padding: '2px 8px',
+          pointerEvents: 'none',
+        }}>
+          Click attacker to assign · Esc to cancel · Dbl-click defender for ∅
+        </div>
+      )}
+
+      {/* Konva stage */}
+      <div style={{
+        position: 'absolute', left: offsetX, top: offsetY,
+        cursor: hoveredId !== null ? 'pointer' : 'default',
+      }}>
         <Stage width={stageW} height={stageH}>
 
-          {/* Layer 1: court image — mirrored when flipped */}
+          {/* Layer 1: court image */}
           <Layer listening={false}>
             {courtImg && (
               <KonvaImage
                 image={courtImg}
-                // Anchor shifts to the opposite edge before scaling, so the image mirrors in place
                 x={flipX ? stageW : 0}
                 y={flipY ? stageH : 0}
                 width={stageW}
@@ -142,46 +186,9 @@ export default function CourtCanvas() {
             )}
           </Layer>
 
-          {/* Layer 2: players + ball + arrows */}
+          {/* Layer 2: arrows + preview */}
           <Layer listening={false}>
-            {frame && frame.players.map((p, idx) => {
-              const { cx, cy } = toCanvas(p.x, p.y, stageW, stageH, flipX, flipY)
-              const isTeamA = meta ? p.teamId === meta.teamA.teamId : idx < 5
-              const color = isTeamA ? COLOR_TEAM_A : COLOR_TEAM_B
-              const jersey = playerDict[p.id]?.jersey ?? String(p.id)
-
-              return (
-                <React.Fragment key={p.id}>
-                  <Circle x={cx} y={cy} radius={playerR} fill={color} />
-                  <Text
-                    x={cx - playerR} y={cy - playerR * 0.55}
-                    width={playerR * 2}
-                    text={jersey}
-                    fontSize={Math.max(8, playerR * 0.9)}
-                    fill="white"
-                    align="center"
-                  />
-                </React.Fragment>
-              )
-            })}
-
-            {/* Ball */}
-            {frame && (() => {
-              const { cx, cy } = toCanvas(frame.ballX, frame.ballY, stageW, stageH, flipX, flipY)
-              const ballZ = isNaN(frame.ballZ) ? 0 : frame.ballZ
-              const r = Math.max(
-                scaleFt(0.5, stageW),
-                Math.min(scaleFt(1.0, stageW), scaleFt(0.5 + ballZ * 0.05, stageW))
-              )
-              return (
-                <>
-                  <Circle x={cx} y={cy} radius={r} fill={COLOR_BALL} />
-                  <Circle x={cx - r * 0.3} y={cy - r * 0.3} radius={r * 0.25} fill="rgba(255,255,255,0.5)" />
-                </>
-              )
-            })()}
-
-            {/* Defense pair arrows */}
+            {/* Committed defense pair arrows */}
             {activePairs.map(pair => {
               const defPos = playerPos[pair.defenderId]
               if (!defPos) return null
@@ -212,6 +219,87 @@ export default function CourtCanvas() {
                 />
               )
             })}
+
+            {/* Preview arrow: selected defender → hovered attacker */}
+            {selectedDefId !== null && hoveredIsAttacker && hoveredId !== null &&
+              playerPos[selectedDefId] && playerPos[hoveredId] && (
+              <Arrow
+                points={[
+                  playerPos[selectedDefId].cx, playerPos[selectedDefId].cy,
+                  playerPos[hoveredId].cx,     playerPos[hoveredId].cy,
+                ]}
+                stroke="#4a90d9"
+                strokeWidth={Math.max(1, scaleFt(0.3, stageW))}
+                dash={[6, 4]}
+                fill="#4a90d9"
+                pointerLength={8}
+                pointerWidth={8}
+                opacity={0.35}
+              />
+            )}
+          </Layer>
+
+          {/* Layer 3: players + ball (interactive) */}
+          <Layer>
+            {frame && frame.players.map((p, idx) => {
+              const { cx, cy } = toCanvas(p.x, p.y, stageW, stageH, flipX, flipY)
+              const isTeamA  = meta ? p.teamId === meta.teamA.teamId : idx < 5
+              const color    = isTeamA ? COLOR_TEAM_A : COLOR_TEAM_B
+              const jersey   = playerDict[p.id]?.jersey ?? String(p.id)
+              const isSelected = selectedDefId === p.id
+              const isHovered  = hoveredId === p.id
+              const defending  = isDefenderFn(p.teamId)
+
+              // Highlight: selected = white ring, hovered attacker (when selecting) = yellow ring
+              const strokeColor = isSelected
+                ? '#ffffff'
+                : (selectedDefId !== null && !defending && isHovered) ? '#ffd700' : 'transparent'
+              const strokeW = (isSelected || (selectedDefId !== null && !defending && isHovered)) ? 2.5 : 0
+              const radius  = isSelected ? playerR * 1.15 : playerR
+
+              return (
+                <Group
+                  key={p.id}
+                  onClick={() => handleClick(p.id, p.teamId)}
+                  onDblClick={() => handleDblClick(p.id, p.teamId)}
+                  onMouseEnter={() => setHoveredId(p.id)}
+                  onMouseLeave={() => setHoveredId(null)}
+                >
+                  <Circle
+                    x={cx} y={cy}
+                    radius={radius}
+                    fill={color}
+                    stroke={strokeColor}
+                    strokeWidth={strokeW}
+                  />
+                  <Text
+                    x={cx - radius} y={cy - radius * 0.55}
+                    width={radius * 2}
+                    text={jersey}
+                    fontSize={Math.max(8, radius * 0.9)}
+                    fill="white"
+                    align="center"
+                    listening={false}
+                  />
+                </Group>
+              )
+            })}
+
+            {/* Ball */}
+            {frame && (() => {
+              const { cx, cy } = toCanvas(frame.ballX, frame.ballY, stageW, stageH, flipX, flipY)
+              const ballZ = isNaN(frame.ballZ) ? 0 : frame.ballZ
+              const r = Math.max(
+                scaleFt(0.5, stageW),
+                Math.min(scaleFt(1.0, stageW), scaleFt(0.5 + ballZ * 0.05, stageW))
+              )
+              return (
+                <>
+                  <Circle x={cx} y={cy} radius={r} fill={COLOR_BALL} listening={false} />
+                  <Circle x={cx - r * 0.3} y={cy - r * 0.3} radius={r * 0.25} fill="rgba(255,255,255,0.5)" listening={false} />
+                </>
+              )
+            })()}
           </Layer>
         </Stage>
       </div>

@@ -11,9 +11,10 @@ const DEAD_ROW_H     = 26   // px for the dead-time toggle row
 
 function fmtClock(s: number): string {
   if (!isFinite(s)) return '--:--'
-  const m = Math.floor(s / 60)
+  const m   = Math.floor(s / 60)
   const sec = Math.floor(s % 60)
-  return `${m}:${String(sec).padStart(2, '0')}`
+  const half = Math.round(s % 1 * 10) === 5 ? '.5' : ''
+  return `${m}:${String(sec).padStart(2, '0')}${half}`
 }
 
 export default function AnnotationArea() {
@@ -26,6 +27,7 @@ export default function AnnotationArea() {
   const deadTimeBuckets    = useStore(s => s.deadTimeBuckets)
   const playerDict         = useStore(s => s.playerDict)
   const scrollRef          = useRef<HTMLDivElement>(null)
+  const prevBucketRef      = useRef<number | null>(null)
 
   const meta   = possession ?? quarterMeta
   const isQtr  = mode === 'quarter'
@@ -93,6 +95,24 @@ export default function AnnotationArea() {
     if (x < scrollLeft + LABEL_W || x + CELL_W > scrollLeft + clientWidth) {
       container.scrollLeft = Math.max(0, x - LABEL_W - (clientWidth - LABEL_W - CELL_W) / 2)
     }
+  }, [currentBucket]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Carry annotations forward: when entering an empty bucket, copy from previous bucket
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  useEffect(() => {
+    if (currentBucket === null) return
+    const { cellAnnotations, setCellAnnotation } = useStore.getState()
+    const hasData = cellAnnotations.some(c => c.shotClockBucket === currentBucket)
+    if (hasData) {
+      prevBucketRef.current = currentBucket
+      return
+    }
+    const prev = prevBucketRef.current
+    if (prev === null) return
+    const toCarry = cellAnnotations.filter(c => c.shotClockBucket === prev)
+    if (toCarry.length === 0) return
+    toCarry.forEach(ann => setCellAnnotation(ann.defenderId, ann.attackerId, currentBucket))
+    prevBucketRef.current = currentBucket
   }, [currentBucket]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleCellDrop = (e: React.DragEvent, defenderId: number, bucket: number) => {

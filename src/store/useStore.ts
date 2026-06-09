@@ -105,6 +105,9 @@ interface AppStore {
   // ── Theme ──
   theme: 'dark' | 'light'
 
+  // ── Court click-to-assign signal (consumed by RosterPanel to sync defOrder) ──
+  lastCourtAssignment: { defId: number; attId: number } | null
+
   // ── Actions ──
   loadPlayerDict: (csvText: string) => void
   loadPossession: (csvText: string, filename: string) => void
@@ -126,6 +129,7 @@ interface AppStore {
   toggleFlipX: () => void
   toggleFlipY: () => void
   toggleTheme: () => void
+  signalCourtAssignment: (defId: number, attId: number) => void
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -168,6 +172,7 @@ export const useStore = create<AppStore>((set, get) => ({
   flipX: false,
   flipY: false,
   theme: 'dark' as const,
+  lastCourtAssignment: null,
 
   loadPlayerDict: (csvText) => {
     const dict = parsePlayerDict(csvText)
@@ -313,4 +318,5 @@ export const useStore = create<AppStore>((set, get) => ({
   toggleFlipX: () => set(s => ({ flipX: !s.flipX })),
   toggleFlipY: () => set(s => ({ flipY: !s.flipY })),
   toggleTheme: () => set(s => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
+  signalCourtAssignment: (defId, attId) => set({ lastCourtAssignment: { defId, attId } }),
 }))

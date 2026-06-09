@@ -1,4 +1,4 @@
-export const QUARTER_BUCKET_S = 1  // seconds per bucket in quarter annotation mode
+export const QUARTER_BUCKET_S = 0.5  // seconds per bucket in quarter annotation mode
 
 export const COURT_W = 94       // feet
 export const COURT_H = 50       // feet
