@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { COLOR_TEAM_A, COLOR_TEAM_B, QUARTER_BUCKET_S } from '../constants'
 import { getBucketDefendingTeamId } from '../utils/defenseTeam'
@@ -28,6 +28,8 @@ export default function AnnotationArea() {
   const deadTimeBuckets    = useStore(s => s.deadTimeBuckets)
   const playerDict         = useStore(s => s.playerDict)
   const scrollRef          = useRef<HTMLDivElement>(null)
+  const topScrollRef       = useRef<HTMLDivElement>(null)
+  const syncingScrollRef   = useRef(false)
 
   const meta   = possession ?? quarterMeta
   const isQtr  = mode === 'quarter'
@@ -105,6 +107,39 @@ export default function AnnotationArea() {
       container.scrollLeft = Math.max(0, x - LABEL_W - (clientWidth - LABEL_W - CELL_W) / 2)
     }
   }, [currentBucket]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Drag across the bucket header row to scrub through frames
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const [isScrubbing, setIsScrubbing] = useState(false)
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  useEffect(() => {
+    if (!isScrubbing) return
+    const onUp = () => setIsScrubbing(false)
+    window.addEventListener('mouseup', onUp)
+    return () => window.removeEventListener('mouseup', onUp)
+  }, [isScrubbing])
+
+  const scrubToBucket = (b: number) => {
+    const fStart = bucketFrameStart.get(b)
+    if (fStart === undefined) return
+    const { setPlaying, setCurrentFrame } = useStore.getState()
+    setPlaying(false)
+    setCurrentFrame(fStart)
+  }
+
+  // Keep the top scrollbar and the table's horizontal scroll in sync
+  const syncFromTop = () => {
+    if (syncingScrollRef.current) { syncingScrollRef.current = false; return }
+    if (!scrollRef.current || !topScrollRef.current) return
+    syncingScrollRef.current = true
+    scrollRef.current.scrollLeft = topScrollRef.current.scrollLeft
+  }
+  const syncFromTable = () => {
+    if (syncingScrollRef.current) { syncingScrollRef.current = false; return }
+    if (!scrollRef.current || !topScrollRef.current) return
+    syncingScrollRef.current = true
+    topScrollRef.current.scrollLeft = scrollRef.current.scrollLeft
+  }
 
   // Carry annotations forward: when entering an empty bucket, copy from nearest preceding bucket
   // eslint-disable-next-line react-hooks/rules-of-hooks
@@ -222,10 +257,23 @@ export default function AnnotationArea() {
   )
 
   return (
-    <div
-      ref={scrollRef}
-      style={{ overflowX: 'auto', overflowY: 'hidden', background: 'var(--bg-page)', userSelect: 'none' }}
-    >
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg-page)' }}>
+      {/* Top scrollbar — mirrors the table's horizontal scroll for easier access */}
+      <div
+        ref={topScrollRef}
+        onScroll={syncFromTop}
+        title="Drag to scroll the timeline"
+        style={{ overflowX: 'auto', overflowY: 'hidden', flexShrink: 0, height: 14 }}
+      >
+        <div style={{ width: tableW, height: 1 }} />
+      </div>
+
+      {/* Table — scrolls both directions */}
+      <div
+        ref={scrollRef}
+        onScroll={syncFromTable}
+        style={{ flex: 1, minHeight: 0, overflow: 'auto', userSelect: 'none' }}
+      >
       <table style={{ width: tableW, minWidth: tableW, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
         <thead>
           <tr>
@@ -255,14 +303,34 @@ export default function AnnotationArea() {
               const isActive = b === currentBucket
               const fStart   = bucketFrameStart.get(b)
               return (
-                <th key={b} style={{
-                  width: CELL_W, minWidth: CELL_W, height: HEADER_H,
-                  background: isActive ? 'var(--bg-col-active)' : 'var(--bg-surface)',
-                  borderBottom: `2px solid ${isActive ? '#4a7ae8' : 'var(--border)'}`,
-                  borderRight: '1px solid var(--border-dim)',
-                  textAlign: 'center', verticalAlign: 'middle',
-                  padding: '3px 0', transition: 'background 0.15s',
-                }}>
+                <th
+                  key={b}
+                  onMouseDown={() => { setIsScrubbing(true); scrubToBucket(b) }}
+                  onMouseEnter={() => { if (isScrubbing) scrubToBucket(b) }}
+                  title="Drag to scrub through frames"
+                  style={{
+                    width: CELL_W, minWidth: CELL_W, height: HEADER_H,
+                    background: isActive ? 'var(--bg-col-active)' : 'var(--bg-surface)',
+                    borderBottom: `2px solid ${isActive ? '#4a7ae8' : 'var(--border)'}`,
+                    borderRight: '1px solid var(--border-dim)',
+                    textAlign: 'center', verticalAlign: 'middle',
+                    padding: '3px 0', transition: 'background 0.15s',
+                    position: 'relative', cursor: 'grab', userSelect: 'none',
+                  }}>
+                  <button
+                    onClick={() => useStore.getState().clearBucketAnnotations(b)}
+                    title="Clear all assignments in this column"
+                    style={{
+                      position: 'absolute', top: 1, right: 1,
+                      width: 14, height: 14, lineHeight: '12px',
+                      padding: 0, fontSize: 10, fontWeight: 700,
+                      background: 'transparent', color: 'var(--text-4)',
+                      border: '1px solid var(--border-dim)', borderRadius: 3,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ✕
+                  </button>
                   {isQtr ? (
                     <>
                       <div style={{ fontSize: 11, fontWeight: 700, color: isActive ? '#4a90d9' : 'var(--text-3)', lineHeight: 1.2 }}>
@@ -362,6 +430,7 @@ export default function AnnotationArea() {
           )}
         </tbody>
       </table>
+      </div>
     </div>
   )
 }

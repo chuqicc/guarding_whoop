@@ -35,7 +35,7 @@ export function exportJSON(
     defender_jersey: string
     defender_id: number
     defender_name: string
-    attacker_jersey: string | null
+    attacker_jersey: string | 'GUARD_NONE' | null
     attacker_id: number | 'GUARD_NONE' | null
     attacker_name: string | null
   }
@@ -86,7 +86,7 @@ export function exportJSON(
           defender_jersey: defender.jersey,
           defender_id:     defender.id,
           defender_name:   defender.name,
-          attacker_jersey: attacker?.jersey ?? null,
+          attacker_jersey: isNone ? 'GUARD_NONE' : (attacker?.jersey ?? null),
           attacker_id:     isNone ? 'GUARD_NONE' : (ann ? ann.attackerId as number : null),
           attacker_name:   isNone ? 'GUARD_NONE' : (attacker?.name ?? null),
         }
@@ -175,6 +175,7 @@ export function exportFrameCSV(
         const ann      = annotations.find(c => c.defenderId === defender.id && c.shotClockBucket === bucket)
         const attacker = ann ? resolveAttacker(ann.attackerId, playerDict) : null
         const isNone   = ann?.attackerId === 'GUARD_NONE'
+        const attJersey = isNone ? 'GUARD_NONE' : (attacker?.jersey ?? '')
         const attId    = isNone ? 'GUARD_NONE' : (ann ? String(ann.attackerId) : '')
         const attName  = isNone ? 'GUARD_NONE' : (attacker?.name ?? '')
 
@@ -185,7 +186,7 @@ export function exportFrameCSV(
           defender.jersey,
           defender.id,
           defender.name,
-          attacker?.jersey ?? '',
+          attJersey,
           attId,
           attName,
           frame.quarterClock.toFixed(2),

@@ -121,6 +121,7 @@ interface AppStore {
   setCellAnnotation: (defenderId: number, attackerId: AttackerId, bucket: number) => void
   removeCellAnnotation: (id: string) => void
   setCellAnnotations: (anns: CellAnnotation[]) => void  // for import / restore
+  clearBucketAnnotations: (bucket: number) => void
   dismissRestore: () => void
   setVideoUrl: (url: string | null) => void
   addSyncPoint:    (frame: number, videoTime: number) => void
@@ -265,6 +266,15 @@ export const useStore = create<AppStore>((set, get) => ({
   },
 
   setCellAnnotations: (anns) => set({ cellAnnotations: anns }),
+
+  clearBucketAnnotations: (bucket) => {
+    set(s => ({ cellAnnotations: s.cellAnnotations.filter(c => c.shotClockBucket !== bucket) }))
+    const { possession, quarterMeta, cellAnnotations } = get()
+    const lsKey = possession
+      ? `annotation_${possession.filename}`
+      : quarterMeta ? `annotation_quarter_${quarterMeta.filename}` : null
+    if (lsKey) localStorage.setItem(lsKey, JSON.stringify(cellAnnotations))
+  },
 
   toggleDeadTimeBucket: (bucket) => {
     set(s => {

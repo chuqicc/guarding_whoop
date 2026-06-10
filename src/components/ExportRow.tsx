@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
 import type { CellAnnotation } from '../store/useStore'
 import { exportJSON, exportFrameCSV } from '../utils/export'
+import { parseAnnotationCSV } from '../utils/importCSV'
 
 interface Props {
   onNewSession: () => void
@@ -9,6 +10,7 @@ interface Props {
 
 export default function ExportRow({ onNewSession }: Props) {
   const possession        = useStore(s => s.possession)
+  const mode              = useStore(s => s.mode)
   const frames            = useStore(s => s.frames)
   const cellAnnotations   = useStore(s => s.cellAnnotations)
   const deadTimeBuckets   = useStore(s => s.deadTimeBuckets)
@@ -20,6 +22,7 @@ export default function ExportRow({ onNewSession }: Props) {
   const [error, setError] = useState<string | null>(null)
 
   const importInputRef     = useRef<HTMLInputElement>(null)
+  const importCSVInputRef  = useRef<HTMLInputElement>(null)
   const possessionInputRef = useRef<HTMLInputElement>(null)
 
   const readFile = (file: File): Promise<string> =>
@@ -49,6 +52,15 @@ export default function ExportRow({ onNewSession }: Props) {
         attackerId: p.attacker_id === null ? 'GUARD_NONE' : p.attacker_id as number,
         shotClockBucket: p.shot_clock_second as number,
       })) ?? []
+      setCellAnnotations(anns)
+      setError(null)
+    } catch (e) { setError(`Failed to import annotations: ${e}`) }
+  }
+
+  const handleImportCSV = async (file: File) => {
+    try {
+      const text = await readFile(file)
+      const anns = parseAnnotationCSV(text, mode === 'quarter')
       setCellAnnotations(anns)
       setError(null)
     } catch (e) { setError(`Failed to import annotations: ${e}`) }
@@ -89,6 +101,13 @@ export default function ExportRow({ onNewSession }: Props) {
         ⬆ Import JSON
         <input ref={importInputRef} type="file" accept=".json" style={{ display: 'none' }}
           onChange={e => { if (e.target.files?.[0]) handleImportJSON(e.target.files[0]) }} />
+      </label>
+
+      {/* Import previously-exported CSV annotations */}
+      <label style={actionBtnStyle(false)}>
+        ⬆ Import CSV
+        <input ref={importCSVInputRef} type="file" accept=".csv" style={{ display: 'none' }}
+          onChange={e => { if (e.target.files?.[0]) handleImportCSV(e.target.files[0]) }} />
       </label>
 
       {/* Export buttons */}
