@@ -15,12 +15,17 @@ Get the latest Windows installer from the [Releases](../../releases) page.
 ### Annotate Quarter
 Load a full-quarter SportVU tracking JSON file and annotate every defender's assignment frame by frame.
 
-- Animated court view shows all 10 players moving in real time
-- Assign each on-court defender to the attacker they are guarding
-- 1-second time buckets — one annotation covers an entire second of play
+- Animated court view shows all 10 players moving in real time, with flip-axis controls (⇆ ⇅) for orienting the court
+- Assign each on-court defender to the attacker they are guarding by dragging from the roster, or mark a defender as guarding no one (`∅` / `GUARD_NONE`)
+- 0.5-second time buckets — one annotation covers half a second of play
+- Swap which team is on offense/defense at any time — past assignments for both teams are preserved and correctly attributed per time bucket, so possession changes mid-quarter no longer erase your work
+- Draggable timeline header lets you scrub through frames by clicking and dragging across bucket columns
+- Clear an entire column's assignments at once with the **✕** button on each bucket header
 - Mark dead-ball periods (out of bounds, free throws, timeouts) to exclude them from analysis
 - Sync a game video alongside the tracking animation for reference
+- All panels (video, court, roster, annotation table) are resizable via drag handles
 - Export results as CSV or JSON, keyed by frame and moment ID for direct join with tracking data
+- Re-import a previously exported JSON or CSV annotation file to resume/edit a session
 
 ### Video Quarter Splitter
 Split a full-game video file into individual quarter clips.
@@ -38,10 +43,11 @@ Split a full-game video file into individual quarter clips.
 1. Launch the app and click **Annotate Quarter**
 2. Drop your SportVU quarter JSON file onto the upload area
 3. Optionally load a video file for side-by-side reference
-4. Use the court animation to navigate frames
-5. Click a defender row in the roster, then click the attacker they are guarding in the assignment table
-6. Mark any dead-ball seconds using the **Dead** toggle in the annotation table
-7. Click **⬇ CSV** or **⬇ JSON** to export when done
+4. Use the court animation, or drag across the timeline header, to navigate frames
+5. Drag an attacker from the roster onto a defender's cell in the assignment table for the current bucket — or drop onto `∅` to mark "guarding no one"
+6. Toggle which team is on defense as possessions change; previously committed assignments for both teams are kept
+7. Mark any dead-ball seconds using the **Dead** toggle, or clear a whole bucket with the column's **✕** button
+8. Click **⬇ CSV** or **⬇ JSON** to export when done — use **⬆ Import CSV** / **⬆ Import JSON** to resume a previous session
 
 ### Video Quarter Splitter — basic workflow
 
@@ -66,10 +72,10 @@ Split a full-game video file into individual quarter clips.
 | `gamestatus` | `active` or `dead` |
 | `defending_team` / `attacking_team` | Team abbreviations |
 | `defender_jersey` / `defender_id` / `defender_name` | Defending player |
-| `attacker_jersey` / `attacker_id` / `attacker_name` | Assigned attacker (`GUARD_NONE` if unguarded) |
+| `attacker_jersey` / `attacker_id` / `attacker_name` | Assigned attacker, or `GUARD_NONE` in all three fields if the defender is marked as guarding no one, or empty if not yet annotated |
 | `quarter_clock` / `shot_clock` | Clock values at this frame |
 
-**JSON** — same data in a nested structure: one metadata block + an array of frame objects each containing an `assignments` array.
+**JSON** — same data in a nested structure: one metadata block + an array of frame objects each containing an `assignments` array. `attacker_jersey`/`attacker_id`/`attacker_name` follow the same `GUARD_NONE` / `null` convention as the CSV.
 
 ---
 
