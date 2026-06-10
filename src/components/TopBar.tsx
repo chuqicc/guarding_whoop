@@ -3,6 +3,7 @@ import { useStore } from '../store/useStore'
 import type { CellAnnotation } from '../store/useStore'
 
 import { exportJSON, exportFrameCSV } from '../utils/export'
+import { parseAnnotationCSV } from '../utils/importCSV'
 
 interface Props {
   onNewSession: () => void
@@ -25,6 +26,7 @@ export default function TopBar({ onNewSession }: Props) {
 
   const [error, setError] = useState<string | null>(null)
   const importRef         = useRef<HTMLInputElement>(null)
+  const importCSVRef      = useRef<HTMLInputElement>(null)
   const swapRef           = useRef<HTMLInputElement>(null)
 
   const meta = possession ?? quarterMeta
@@ -69,6 +71,14 @@ export default function TopBar({ onNewSession }: Props) {
         attackerId: p.attacker_id === null ? 'GUARD_NONE' : p.attacker_id as number,
         shotClockBucket: p.shot_clock_second as number,
       })) ?? []
+      setCellAnnotations(anns)
+      setError(null)
+    } catch (e) { setError(`Import failed: ${e}`) }
+  }
+
+  const handleImportCSV = async (file: File) => {
+    try {
+      const anns = parseAnnotationCSV(await readFile(file), mode === 'quarter')
       setCellAnnotations(anns)
       setError(null)
     } catch (e) { setError(`Import failed: ${e}`) }
@@ -177,9 +187,16 @@ export default function TopBar({ onNewSession }: Props) {
 
         {/* Import JSON */}
         <label style={btnStyle(false)} title="Import previously exported JSON annotations">
-          ⬆ Import
+          ⬆ Import JSON
           <input ref={importRef} type="file" accept=".json" style={{ display: 'none' }}
             onChange={e => { if (e.target.files?.[0]) handleImportJSON(e.target.files[0]) }} />
+        </label>
+
+        {/* Import CSV */}
+        <label style={btnStyle(false)} title="Import previously exported CSV annotations">
+          ⬆ Import CSV
+          <input ref={importCSVRef} type="file" accept=".csv" style={{ display: 'none' }}
+            onChange={e => { if (e.target.files?.[0]) handleImportCSV(e.target.files[0]) }} />
         </label>
 
         {/* Export JSON */}
