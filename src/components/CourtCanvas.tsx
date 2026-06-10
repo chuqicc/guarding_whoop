@@ -136,22 +136,20 @@ export default function CourtCanvas() {
     : false
 
   return (
-    <div
-      ref={containerRef}
-      style={{ flex: 1, height: '100%', overflow: 'hidden', position: 'relative', background: 'var(--bg-cell)' }}
-    >
-      {/* Flip buttons */}
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Toolbar */}
       <div style={{
-        position: 'absolute',
-        top: offsetY + 5,
-        right: containerSize.w - offsetX - stageW + 5,
-        zIndex: 20,
-        display: 'flex', gap: 3,
+        flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: 3,
+        padding: '3px 6px', background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)',
       }}>
         <button onClick={toggleFlipX} title={flipX ? 'Undo left↔right flip' : 'Flip left↔right'} style={flipBtnStyle(flipX)}>⇆</button>
         <button onClick={toggleFlipY} title={flipY ? 'Undo top↔bottom flip' : 'Flip top↔bottom'} style={flipBtnStyle(flipY)}>⇅</button>
       </div>
 
+    <div
+      ref={containerRef}
+      style={{ flex: 1, minHeight: 0, overflow: 'hidden', position: 'relative', background: 'var(--bg-cell)' }}
+    >
       {/* Selection hint */}
       {selectedDefId !== null && (
         <div style={{
@@ -303,6 +301,7 @@ export default function CourtCanvas() {
           </Layer>
         </Stage>
       </div>
+    </div>
     </div>
   )
 }
