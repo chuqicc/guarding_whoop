@@ -232,11 +232,11 @@ export const useStore = create<AppStore>((set, get) => ({
     if (possession) {
       const newDefId = possession.defendingTeamId === possession.teamA.teamId
         ? possession.teamB.teamId : possession.teamA.teamId
-      set({ possession: { ...possession, defendingTeamId: newDefId }, cellAnnotations: [] })
+      set({ possession: { ...possession, defendingTeamId: newDefId } })
     } else if (quarterMeta) {
       const newDefId = quarterMeta.defendingTeamId === quarterMeta.teamA.teamId
         ? quarterMeta.teamB.teamId : quarterMeta.teamA.teamId
-      set({ quarterMeta: { ...quarterMeta, defendingTeamId: newDefId }, cellAnnotations: [] })
+      set({ quarterMeta: { ...quarterMeta, defendingTeamId: newDefId } })
     }
   },
 

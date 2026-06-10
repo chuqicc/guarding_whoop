@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useStore } from '../store/useStore'
 import { COLOR_TEAM_A, COLOR_TEAM_B, QUARTER_BUCKET_S } from '../constants'
+import { getBucketDefendingTeamId } from '../utils/defenseTeam'
 
 const CELL_W_POSS    = 58   // px per shot-clock second (possession mode)
 const CELL_W_QUARTER = 36   // px per 1-second bucket (quarter mode)
@@ -40,12 +41,21 @@ export default function AnnotationArea() {
     )
   }
 
-  const defTeam = meta.defendingTeamId === meta.teamA.teamId ? meta.teamA : meta.teamB
-  const defColor = defTeam.teamId === meta.teamA.teamId ? COLOR_TEAM_A : COLOR_TEAM_B
+  // Current defending team's rows (primary), plus the other team's rows for
+  // any historical defensive assignments recorded before the last swap.
+  const curDefTeam  = meta.defendingTeamId === meta.teamA.teamId ? meta.teamA : meta.teamB
+  const otherTeam   = meta.defendingTeamId === meta.teamA.teamId ? meta.teamB : meta.teamA
+  const curDefColor = curDefTeam.teamId === meta.teamA.teamId ? COLOR_TEAM_A : COLOR_TEAM_B
+  const otherColor  = otherTeam.teamId  === meta.teamA.teamId ? COLOR_TEAM_A : COLOR_TEAM_B
 
-  // Only show defenders currently on the court
-  const onCourtIds  = new Set((frames[currentFrame]?.players ?? []).map(p => p.id))
-  const defPlayers  = defTeam.players.filter(p => onCourtIds.has(p.id))
+  const onCourtIds = new Set((frames[currentFrame]?.players ?? []).map(p => p.id))
+  const historicalDefenderIds = new Set(cellAnnotations.map(c => c.defenderId))
+
+  const buildRows = (team: typeof meta.teamA) =>
+    team.players.filter(p => onCourtIds.has(p.id) || historicalDefenderIds.has(p.id))
+
+  const curDefRows = buildRows(curDefTeam)
+  const otherRows  = buildRows(otherTeam)
 
   // ── Buckets ──────────────────────────────────────────────────────────────
   const getBucket = (qc: number, sc: number | null) =>
@@ -109,6 +119,11 @@ export default function AnnotationArea() {
       .sort((a, b) => a - b)[0]  // smallest of those = closest preceding
 
     if (prevBucket === undefined) return
+
+    // Don't carry assignments across a defending-team swap boundary
+    const prevDefTeamId = getBucketDefendingTeamId(prevBucket, cellAnnotations, playerDict, meta.defendingTeamId)
+    if (prevDefTeamId !== meta.defendingTeamId) return
+
     cellAnnotations
       .filter(c => c.shotClockBucket === prevBucket)
       .forEach(ann => setCellAnnotation(ann.defenderId, ann.attackerId, currentBucket))
@@ -130,6 +145,81 @@ export default function AnnotationArea() {
   }
 
   const tableW = LABEL_W + buckets.length * CELL_W
+
+  const renderDefenderRow = (player: typeof meta.teamA.players[number], color: string) => (
+    <tr key={player.id}>
+      <td style={{
+        position: 'sticky', left: 0, width: LABEL_W, minWidth: LABEL_W,
+        height: ROW_H, background: 'var(--bg-panel)', zIndex: 1,
+        borderBottom: '1px solid var(--border-dim)', borderRight: '1px solid var(--border)',
+        padding: '0 10px',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+          <span style={{ color, fontWeight: 700, fontSize: 14 }}>
+            #{player.jersey}
+          </span>
+          <span style={{ color: 'var(--text-2)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {player.name}
+          </span>
+        </div>
+      </td>
+
+      {buckets.map(b => {
+        const isDead     = deadTimeBuckets.includes(b)
+        const bDefTeamId = getBucketDefendingTeamId(b, cellAnnotations, playerDict, meta.defendingTeamId)
+        const isActiveDefender = player.teamId === bDefTeamId
+
+        if (!isActiveDefender) {
+          return (
+            <td
+              key={b}
+              title="Other team was on offense this bucket"
+              style={{
+                width: CELL_W, minWidth: CELL_W, height: ROW_H,
+                background: 'var(--bg-cell)',
+                border: `1px solid ${isDead ? '#5a3a00' : 'var(--border-dim)'}`,
+                opacity: 0.25,
+                cursor: 'not-allowed',
+              }}
+            />
+          )
+        }
+
+        const ann      = cellAnnotations.find(c => c.defenderId === player.id && c.shotClockBucket === b)
+        const isActive = b === currentBucket
+        const isNone   = ann?.attackerId === 'GUARD_NONE'
+        const attacker = ann && !isNone ? playerDict[ann.attackerId as number] : null
+
+        return (
+          <td
+            key={b}
+            onDragOver={e => e.preventDefault()}
+            onDrop={e => handleCellDrop(e, player.id, b)}
+            onDoubleClick={() => handleCellDblClick(player.id, b)}
+            title={ann ? 'Double-click to clear' : 'Drag attacker here'}
+            style={{
+              width: CELL_W, minWidth: CELL_W, height: ROW_H,
+              textAlign: 'center', verticalAlign: 'middle',
+              background: isDead
+                ? '#2a1800'
+                : ann
+                  ? (isActive ? 'var(--bg-cell-ann-act)' : (isNone ? 'var(--bg-cell-none)' : 'var(--bg-cell-ann)'))
+                  : (isActive ? 'var(--bg-cell-active)' : 'var(--bg-page)'),
+              border: isActive ? '1px solid #2a4a7a' : `1px solid ${isDead ? '#5a3a00' : 'var(--border-dim)'}`,
+              cursor: 'default', transition: 'background 0.15s',
+              opacity: isDead ? 0.5 : 1,
+            }}
+          >
+            {ann && (
+              <span style={{ fontSize: 13, fontWeight: 700, color: isNone ? '#666' : '#d4e8ff', display: 'inline-block', lineHeight: 1 }}>
+                {isNone ? '∅' : (attacker ? `#${attacker.jersey}` : '?')}
+              </span>
+            )}
+          </td>
+        )
+      })}
+    </tr>
+  )
 
   return (
     <div
@@ -240,62 +330,36 @@ export default function AnnotationArea() {
             })}
           </tr>
 
-          {/* ── Defender rows ──────────────────────────────────────────── */}
-          {defPlayers.map(player => (
-            <tr key={player.id}>
-              <td style={{
-                position: 'sticky', left: 0, width: LABEL_W, minWidth: LABEL_W,
-                height: ROW_H, background: 'var(--bg-panel)', zIndex: 1,
-                borderBottom: '1px solid var(--border-dim)', borderRight: '1px solid var(--border)',
-                padding: '0 10px',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                  <span style={{ color: defColor, fontWeight: 700, fontSize: 14 }}>
-                    #{player.jersey}
-                  </span>
-                  <span style={{ color: 'var(--text-2)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {player.name}
-                  </span>
-                </div>
-              </td>
+          {/* ── Current defending team's rows ───────────────────────────── */}
+          {curDefRows.map(player => renderDefenderRow(player, curDefColor))}
 
-              {buckets.map(b => {
-                const ann      = cellAnnotations.find(c => c.defenderId === player.id && c.shotClockBucket === b)
-                const isActive = b === currentBucket
-                const isDead   = deadTimeBuckets.includes(b)
-                const isNone   = ann?.attackerId === 'GUARD_NONE'
-                const attacker = ann && !isNone ? playerDict[ann.attackerId as number] : null
-
-                return (
-                  <td
-                    key={b}
-                    onDragOver={e => e.preventDefault()}
-                    onDrop={e => handleCellDrop(e, player.id, b)}
-                    onDoubleClick={() => handleCellDblClick(player.id, b)}
-                    title={ann ? 'Double-click to clear' : 'Drag attacker here'}
-                    style={{
-                      width: CELL_W, minWidth: CELL_W, height: ROW_H,
-                      textAlign: 'center', verticalAlign: 'middle',
-                      background: isDead
-                        ? '#2a1800'
-                        : ann
-                          ? (isActive ? 'var(--bg-cell-ann-act)' : (isNone ? 'var(--bg-cell-none)' : 'var(--bg-cell-ann)'))
-                          : (isActive ? 'var(--bg-cell-active)' : 'var(--bg-page)'),
-                      border: isActive ? '1px solid #2a4a7a' : `1px solid ${isDead ? '#5a3a00' : 'var(--border-dim)'}`,
-                      cursor: 'default', transition: 'background 0.15s',
-                      opacity: isDead ? 0.5 : 1,
-                    }}
-                  >
-                    {ann && (
-                      <span style={{ fontSize: 13, fontWeight: 700, color: isNone ? '#666' : '#d4e8ff', display: 'inline-block', lineHeight: 1 }}>
-                        {isNone ? '∅' : (attacker ? `#${attacker.jersey}` : '?')}
-                      </span>
-                    )}
-                  </td>
-                )
-              })}
-            </tr>
-          ))}
+          {/* ── Other team's historical defensive assignments ───────────── */}
+          {otherRows.length > 0 && (
+            <>
+              <tr>
+                <td style={{
+                  position: 'sticky', left: 0, width: LABEL_W, minWidth: LABEL_W,
+                  height: 20, background: 'var(--bg-panel)', zIndex: 1,
+                  borderBottom: '1px solid var(--border)', borderRight: '1px solid var(--border)',
+                  borderTop: '2px solid var(--border)',
+                  padding: '0 10px',
+                }}>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: otherColor, textTransform: 'uppercase' }}>
+                    {otherTeam.abbr} (prev. defense)
+                  </span>
+                </td>
+                {buckets.map(b => (
+                  <td key={b} style={{
+                    width: CELL_W, minWidth: CELL_W, height: 20,
+                    borderTop: '2px solid var(--border)',
+                    borderRight: '1px solid var(--border-dim)',
+                    background: 'var(--bg-panel)',
+                  }} />
+                ))}
+              </tr>
+              {otherRows.map(player => renderDefenderRow(player, otherColor))}
+            </>
+          )}
         </tbody>
       </table>
     </div>

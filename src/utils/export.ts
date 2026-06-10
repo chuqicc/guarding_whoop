@@ -1,5 +1,6 @@
 import type { CellAnnotation, TrackingFrame, PossessionMeta, QuarterMeta, Player, AttackerId } from '../store/useStore'
 import { QUARTER_BUCKET_S } from '../constants'
+import { getBucketDefendingTeamId } from './defenseTeam'
 
 type ExportMeta = PossessionMeta | QuarterMeta
 
@@ -28,8 +29,6 @@ export function exportJSON(
   playerDict: Record<number, Player>
 ) {
   const isPoss      = isPossession(meta)
-  const defTeamAbbr = meta.teamA.teamId === meta.defendingTeamId ? meta.teamA.abbr : meta.teamB.abbr
-  const attTeamAbbr = meta.teamA.teamId === meta.defendingTeamId ? meta.teamB.abbr : meta.teamA.abbr
   const deadSet     = new Set(deadTimeBuckets)
 
   type Assignment = {
@@ -72,11 +71,12 @@ export function exportJSON(
         assignments:    [],
       })
     } else {
+      const bDefTeamId = getBucketDefendingTeamId(bucket, annotations, playerDict, meta.defendingTeamId)
+      const bDefTeam   = bDefTeamId === meta.teamA.teamId ? meta.teamA : meta.teamB
+      const bAttTeam   = bDefTeamId === meta.teamA.teamId ? meta.teamB : meta.teamA
+
       const onCourtIds = new Set(frame.players.map(p => p.id))
-      const defPlayers = (meta.defendingTeamId === meta.teamA.teamId
-        ? meta.teamA.players
-        : meta.teamB.players
-      ).filter(p => onCourtIds.has(p.id))
+      const defPlayers = bDefTeam.players.filter(p => onCourtIds.has(p.id))
 
       const assignments: Assignment[] = defPlayers.map(defender => {
         const ann      = annotations.find(c => c.defenderId === defender.id && c.shotClockBucket === bucket)
@@ -98,8 +98,8 @@ export function exportJSON(
         quarter_clock:  parseFloat(frame.quarterClock.toFixed(2)),
         shot_clock:     frame.shotClock !== null ? parseFloat(frame.shotClock.toFixed(2)) : null,
         gamestatus:     'active',
-        defending_team: defTeamAbbr,
-        attacking_team: attTeamAbbr,
+        defending_team: bDefTeam.abbr,
+        attacking_team: bAttTeam.abbr,
         assignments,
       })
     }
@@ -133,8 +133,6 @@ export function exportFrameCSV(
   playerDict: Record<number, Player>
 ) {
   const isPoss      = isPossession(meta)
-  const defTeamAbbr = meta.teamA.teamId === meta.defendingTeamId ? meta.teamA.abbr : meta.teamB.abbr
-  const attTeamAbbr = meta.teamA.teamId === meta.defendingTeamId ? meta.teamB.abbr : meta.teamA.abbr
   const deadSet     = new Set(deadTimeBuckets)
 
   const headers = [
@@ -166,11 +164,12 @@ export function exportFrameCSV(
         rows.push([...base, '', '', '', '', '', '', '', '', '', ''].join(','))
       }
     } else {
+      const bDefTeamId = getBucketDefendingTeamId(bucket, annotations, playerDict, meta.defendingTeamId)
+      const bDefTeam   = bDefTeamId === meta.teamA.teamId ? meta.teamA : meta.teamB
+      const bAttTeam   = bDefTeamId === meta.teamA.teamId ? meta.teamB : meta.teamA
+
       const onCourtIds = new Set(frame.players.map(p => p.id))
-      const defPlayers = (meta.defendingTeamId === meta.teamA.teamId
-        ? meta.teamA.players
-        : meta.teamB.players
-      ).filter(p => onCourtIds.has(p.id))
+      const defPlayers = bDefTeam.players.filter(p => onCourtIds.has(p.id))
 
       for (const defender of defPlayers) {
         const ann      = annotations.find(c => c.defenderId === defender.id && c.shotClockBucket === bucket)
@@ -181,8 +180,8 @@ export function exportFrameCSV(
 
         rows.push([
           ...base,
-          defTeamAbbr,
-          attTeamAbbr,
+          bDefTeam.abbr,
+          bAttTeam.abbr,
           defender.jersey,
           defender.id,
           defender.name,
