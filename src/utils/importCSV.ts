@@ -14,6 +14,7 @@ export function parseAnnotationCSV(csvText: string, isQuarter: boolean): CellAnn
   const iAttackerId   = headers.indexOf('attacker_id')
   const iQuarterClock = headers.indexOf('quarter_clock')
   const iShotClock    = headers.indexOf('shot_clock')
+  const iConfidence   = headers.indexOf('confidence')
 
   const seen = new Map<string, CellAnnotation>()
 
@@ -40,9 +41,15 @@ export function parseAnnotationCSV(csvText: string, isQuarter: boolean): CellAnn
       bucket = Math.floor(sc)
     }
 
+    let confidence: 1 | 2 | 3 | undefined
+    if (iConfidence !== -1) {
+      const c = parseInt(cols[iConfidence])
+      if (c === 1 || c === 2 || c === 3) confidence = c
+    }
+
     const key = `${defenderId}_${bucket}`
     if (!seen.has(key)) {
-      seen.set(key, { id: uuid(), defenderId, attackerId, shotClockBucket: bucket })
+      seen.set(key, { id: uuid(), defenderId, attackerId, shotClockBucket: bucket, confidence })
     }
   }
 

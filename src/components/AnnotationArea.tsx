@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { COLOR_TEAM_A, COLOR_TEAM_B, QUARTER_BUCKET_S } from '../constants'
 import { getBucketDefendingTeamId } from '../utils/defenseTeam'
+import { computeCarryForward } from '../utils/carryForward'
 
 const CELL_W_POSS    = 58   // px per shot-clock second (possession mode)
 const CELL_W_QUARTER = 36   // px per 1-second bucket (quarter mode)
@@ -26,10 +27,10 @@ export default function AnnotationArea() {
   const currentFrame       = useStore(s => s.currentFrame)
   const cellAnnotations    = useStore(s => s.cellAnnotations)
   const deadTimeBuckets    = useStore(s => s.deadTimeBuckets)
+  const shotBuckets        = useStore(s => s.shotBuckets)
+  const reboundBuckets     = useStore(s => s.reboundBuckets)
   const playerDict         = useStore(s => s.playerDict)
   const scrollRef          = useRef<HTMLDivElement>(null)
-  const topScrollRef       = useRef<HTMLDivElement>(null)
-  const syncingScrollRef   = useRef(false)
 
   const meta   = possession ?? quarterMeta
   const isQtr  = mode === 'quarter'
@@ -74,8 +75,9 @@ export default function AnnotationArea() {
           .map(f => Math.floor(f.shotClock!))
       )].sort((a, b) => b - a)
 
-  // Per-bucket: representative quarter clock + first frame index
+  // Per-bucket: representative quarter clock + shot clock + first frame index
   const bucketQClock     = new Map<number, number>()
+  const bucketShotClock  = new Map<number, number>()
   const bucketFrameStart = new Map<number, number>()
   for (const f of frames) {
     const b = getBucket(f.quarterClock, f.shotClock)
@@ -83,9 +85,10 @@ export default function AnnotationArea() {
     if (!bucketFrameStart.has(b) || f.frameIndex < bucketFrameStart.get(b)!) {
       bucketFrameStart.set(b, f.frameIndex)
     }
-    if (!isQtr) {
-      const cur = bucketQClock.get(b)
-      if (cur === undefined || f.quarterClock > cur) bucketQClock.set(b, f.quarterClock)
+    const cur = bucketQClock.get(b)
+    if (cur === undefined || f.quarterClock > cur) {
+      bucketQClock.set(b, f.quarterClock)
+      if (f.shotClock !== null && !isNaN(f.shotClock)) bucketShotClock.set(b, f.shotClock)
     }
   }
 
@@ -127,45 +130,48 @@ export default function AnnotationArea() {
     setCurrentFrame(fStart)
   }
 
-  // Keep the top scrollbar and the table's horizontal scroll in sync
-  const syncFromTop = () => {
-    if (syncingScrollRef.current) { syncingScrollRef.current = false; return }
-    if (!scrollRef.current || !topScrollRef.current) return
-    syncingScrollRef.current = true
-    scrollRef.current.scrollLeft = topScrollRef.current.scrollLeft
-  }
-  const syncFromTable = () => {
-    if (syncingScrollRef.current) { syncingScrollRef.current = false; return }
-    if (!scrollRef.current || !topScrollRef.current) return
-    syncingScrollRef.current = true
-    topScrollRef.current.scrollLeft = scrollRef.current.scrollLeft
-  }
-
-  // Carry annotations forward: when entering an empty bucket, copy from nearest preceding bucket
+  // Carry annotations forward: for each defender with no annotation in the current
+  // (empty) bucket, copy from that defender's own nearest preceding bucket.
+  // Rules (dead-time, swap barriers, memory toggle) live in computeCarryForward.
   // eslint-disable-next-line react-hooks/rules-of-hooks
   useEffect(() => {
     if (currentBucket === null) return
-    const { cellAnnotations, setCellAnnotation } = useStore.getState()
-    if (cellAnnotations.some(c => c.shotClockBucket === currentBucket)) return
-
-    // Clock counts down during play, so "preceding" bucket has a higher value
-    const prevBucket = [...new Set(cellAnnotations.map(c => c.shotClockBucket))]
-      .filter(b => b > currentBucket)
-      .sort((a, b) => a - b)[0]  // smallest of those = closest preceding
-
-    if (prevBucket === undefined) return
-
-    // Don't carry assignments across a defending-team swap boundary
-    const prevDefTeamId = getBucketDefendingTeamId(prevBucket, cellAnnotations, playerDict, meta.defendingTeamId)
-    if (prevDefTeamId !== meta.defendingTeamId) return
-
-    cellAnnotations
-      .filter(c => c.shotClockBucket === prevBucket)
-      .forEach(ann => setCellAnnotation(ann.defenderId, ann.attackerId, currentBucket))
+    const s = useStore.getState()
+    const fills = computeCarryForward({
+      currentBucket,
+      cellAnnotations:     s.cellAnnotations,
+      playerDict:          s.playerDict,
+      defendingTeamId:     meta.defendingTeamId,
+      autoFillMemory:      s.autoFillMemory,
+      deadTimeBuckets:     s.deadTimeBuckets,
+      memoryBarrierFrames: s.memoryBarrierFrames,
+      bucketFrameStart,
+    })
+    for (const f of fills) {
+      s.setCellAnnotation(f.defenderId, f.attackerId, currentBucket, f.confidence)
+    }
   }, [currentBucket]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Confidence rating: click an annotated cell to focus it, then press 1/2/3
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const [focusedCell, setFocusedCell] = useState<{ defenderId: number; bucket: number } | null>(null)
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setFocusedCell(null); return }
+      if (!focusedCell) return
+      if (e.key === '1' || e.key === '2' || e.key === '3') {
+        useStore.getState().setCellConfidence(focusedCell.defenderId, focusedCell.bucket, Number(e.key) as 1 | 2 | 3)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [focusedCell])
 
   const handleCellDrop = (e: React.DragEvent, defenderId: number, bucket: number) => {
     e.preventDefault()
+    // Dead-time buckets never accept assignments (hard rule, feature #1)
+    if (useStore.getState().deadTimeBuckets.includes(bucket)) return
     const raw = e.dataTransfer.getData('attackerId')
     if (!raw) return
     const attackerId = raw === 'GUARD_NONE' ? 'GUARD_NONE' : parseInt(raw)
@@ -212,7 +218,7 @@ export default function AnnotationArea() {
               style={{
                 width: CELL_W, minWidth: CELL_W, height: ROW_H,
                 background: 'var(--bg-cell)',
-                border: `1px solid ${isDead ? '#5a3a00' : 'var(--border-dim)'}`,
+                border: `1px solid ${isDead ? 'var(--border-dead)' : 'var(--border-dim)'}`,
                 opacity: 0.25,
                 cursor: 'not-allowed',
               }}
@@ -220,28 +226,39 @@ export default function AnnotationArea() {
           )
         }
 
-        const ann      = cellAnnotations.find(c => c.defenderId === player.id && c.shotClockBucket === b)
-        const isActive = b === currentBucket
-        const isNone   = ann?.attackerId === 'GUARD_NONE'
-        const attacker = ann && !isNone ? playerDict[ann.attackerId as number] : null
+        const ann       = cellAnnotations.find(c => c.defenderId === player.id && c.shotClockBucket === b)
+        const isActive  = b === currentBucket
+        const isNone    = ann?.attackerId === 'GUARD_NONE'
+        const attacker  = ann && !isNone ? playerDict[ann.attackerId as number] : null
+        const confidence = ann?.confidence ?? 3
+        const isFocused = !!ann && focusedCell?.defenderId === player.id && focusedCell?.bucket === b
+        const confColor = confidence === 1 ? 'var(--confidence-low)' : confidence === 2 ? 'var(--confidence-mid)' : 'transparent'
 
         return (
           <td
             key={b}
-            onDragOver={e => e.preventDefault()}
+            onClick={() => {
+              if (!ann) return
+              setFocusedCell(prev => (prev?.defenderId === player.id && prev?.bucket === b) ? null : { defenderId: player.id, bucket: b })
+            }}
+            onDragOver={e => { if (!isDead) e.preventDefault() }}
             onDrop={e => handleCellDrop(e, player.id, b)}
             onDoubleClick={() => handleCellDblClick(player.id, b)}
-            title={ann ? 'Double-click to clear' : 'Drag attacker here'}
+            title={isDead
+              ? 'Dead time — assignments locked'
+              : ann ? 'Click to focus, press 1/2/3 for confidence · Double-click to clear' : 'Drag attacker here'}
             style={{
               width: CELL_W, minWidth: CELL_W, height: ROW_H,
               textAlign: 'center', verticalAlign: 'middle',
               background: isDead
-                ? '#2a1800'
+                ? 'var(--bg-dead-dim)'
                 : ann
                   ? (isActive ? 'var(--bg-cell-ann-act)' : (isNone ? 'var(--bg-cell-none)' : 'var(--bg-cell-ann)'))
                   : (isActive ? 'var(--bg-cell-active)' : 'var(--bg-page)'),
-              border: isActive ? '1px solid #2a4a7a' : `1px solid ${isDead ? '#5a3a00' : 'var(--border-dim)'}`,
-              cursor: 'default', transition: 'background 0.15s',
+              border: isActive ? '1px solid #2a4a7a' : `1px solid ${isDead ? 'var(--border-dead)' : 'var(--border-dim)'}`,
+              borderBottom: `3px solid ${confColor}`,
+              boxShadow: isFocused ? 'inset 0 0 0 2px var(--focus-ring)' : 'none',
+              cursor: isDead ? 'not-allowed' : ann ? 'pointer' : 'default', transition: 'background 0.15s',
               opacity: isDead ? 0.5 : 1,
             }}
           >
@@ -258,20 +275,9 @@ export default function AnnotationArea() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg-page)' }}>
-      {/* Top scrollbar — mirrors the table's horizontal scroll for easier access */}
-      <div
-        ref={topScrollRef}
-        onScroll={syncFromTop}
-        title="Drag to scroll the timeline"
-        style={{ overflowX: 'auto', overflowY: 'hidden', flexShrink: 0, height: 14 }}
-      >
-        <div style={{ width: tableW, height: 1 }} />
-      </div>
-
       {/* Table — scrolls both directions */}
       <div
         ref={scrollRef}
-        onScroll={syncFromTable}
         style={{ flex: 1, minHeight: 0, overflow: 'auto', userSelect: 'none' }}
       >
       <table style={{ width: tableW, minWidth: tableW, borderCollapse: 'collapse', tableLayout: 'fixed' }}>
@@ -286,14 +292,15 @@ export default function AnnotationArea() {
             }}>
               {isQtr ? (
                 <>
-                  <div style={{ fontSize: 11, color: '#5a7aaa', fontWeight: 600 }}>Q-Clock</div>
-                  <div style={{ fontSize: 9,  color: '#3a4a5a', marginTop: 1 }}>frame start</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-2)', fontWeight: 600 }}>Q-Clock</div>
+                  <div style={{ fontSize: 9,  color: 'var(--text-3)', marginTop: 1 }}>Shot</div>
+                  <div style={{ fontSize: 9,  color: 'var(--text-3)', marginTop: 1 }}>frame start</div>
                 </>
               ) : (
                 <>
-                  <div style={{ fontSize: 11, color: '#5a7aaa', fontWeight: 600 }}>Shot</div>
-                  <div style={{ fontSize: 9,  color: '#3a4a5a', marginTop: 1 }}>Q-Clock</div>
-                  <div style={{ fontSize: 9,  color: '#3a4a5a', marginTop: 1 }}>frame</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-2)', fontWeight: 600 }}>Shot</div>
+                  <div style={{ fontSize: 9,  color: 'var(--text-3)', marginTop: 1 }}>Q-Clock</div>
+                  <div style={{ fontSize: 9,  color: 'var(--text-3)', marginTop: 1 }}>frame</div>
                 </>
               )}
             </th>
@@ -336,7 +343,10 @@ export default function AnnotationArea() {
                       <div style={{ fontSize: 11, fontWeight: 700, color: isActive ? '#4a90d9' : 'var(--text-3)', lineHeight: 1.2 }}>
                         {fmtClock(b)}
                       </div>
-                      <div style={{ fontSize: 9, color: isActive ? '#3a6aaa' : 'var(--text-4)', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
+                      <div style={{ fontSize: 9, color: isActive ? '#4a7ac8' : 'var(--text-4)', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
+                        {bucketShotClock.get(b) !== undefined ? bucketShotClock.get(b)!.toFixed(1) : ''}
+                      </div>
+                      <div style={{ fontSize: 9, color: isActive ? '#3a6aaa' : 'var(--text-4)', marginTop: 1, fontVariantNumeric: 'tabular-nums' }}>
                         {fStart !== undefined ? `f${fStart}` : ''}
                       </div>
                     </>
@@ -370,7 +380,7 @@ export default function AnnotationArea() {
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ fontSize: 13 }}>⏸</span>
-                <span style={{ fontSize: 11, fontWeight: 600, color: '#8a6a3a' }}>Dead time</span>
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-dead)' }}>Dead time</span>
               </div>
             </td>
             {buckets.map(b => {
@@ -384,19 +394,65 @@ export default function AnnotationArea() {
                   style={{
                     width: CELL_W, minWidth: CELL_W, height: DEAD_ROW_H,
                     textAlign: 'center', verticalAlign: 'middle',
-                    background: isDead ? '#3a2000' : (isActive ? 'var(--bg-col-active)' : 'transparent'),
-                    border: isActive ? '1px solid #2a4a7a' : `1px solid ${isDead ? '#7a4a00' : 'var(--border-dim)'}`,
+                    background: isDead ? 'var(--bg-dead)' : (isActive ? 'var(--bg-col-active)' : 'transparent'),
+                    border: isActive ? '1px solid #2a4a7a' : `1px solid ${isDead ? 'var(--border-dead-active)' : 'var(--border-dim)'}`,
                     cursor: 'pointer',
                     transition: 'background 0.1s',
                   }}
                 >
                   {isDead && (
-                    <span style={{ fontSize: 9, fontWeight: 700, color: '#c87a20' }}>DEAD</span>
+                    <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-dead-active)' }}>DEAD</span>
                   )}
                 </td>
               )
             })}
           </tr>
+
+          {/* ── Shot / Rebound event rows ─────────────────────────────── */}
+          {([
+            { label: 'Shot',    icon: '🏀', marked: shotBuckets,    color: '#e0952c', tag: 'SHOT',
+              toggle: (b: number) => useStore.getState().toggleShotBucket(b) },
+            { label: 'Rebound', icon: '↩',  marked: reboundBuckets, color: '#4caf7d', tag: 'REB',
+              toggle: (b: number) => useStore.getState().toggleReboundBucket(b) },
+          ] as const).map(row => (
+            <tr key={row.label}>
+              <td style={{
+                position: 'sticky', left: 0, width: LABEL_W, minWidth: LABEL_W,
+                height: DEAD_ROW_H, background: 'var(--bg-panel)', zIndex: 1,
+                borderBottom: row.label === 'Rebound' ? '2px solid var(--border)' : '1px solid var(--border-dim)',
+                borderRight: '1px solid var(--border)',
+                padding: '0 10px',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 12 }}>{row.icon}</span>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: row.color }}>{row.label}</span>
+                </div>
+              </td>
+              {buckets.map(b => {
+                const isMarked = row.marked.includes(b)
+                const isActive = b === currentBucket
+                return (
+                  <td
+                    key={b}
+                    onClick={() => row.toggle(b)}
+                    title={isMarked ? `${row.label} — click to unmark` : `Click to mark ${row.label.toLowerCase()} in this bucket`}
+                    style={{
+                      width: CELL_W, minWidth: CELL_W, height: DEAD_ROW_H,
+                      textAlign: 'center', verticalAlign: 'middle',
+                      background: isMarked ? `${row.color}33` : (isActive ? 'var(--bg-col-active)' : 'transparent'),
+                      border: isActive ? '1px solid #2a4a7a' : `1px solid ${isMarked ? row.color : 'var(--border-dim)'}`,
+                      cursor: 'pointer',
+                      transition: 'background 0.1s',
+                    }}
+                  >
+                    {isMarked && (
+                      <span style={{ fontSize: 9, fontWeight: 700, color: row.color }}>{row.tag}</span>
+                    )}
+                  </td>
+                )
+              })}
+            </tr>
+          ))}
 
           {/* ── Current defending team's rows ───────────────────────────── */}
           {curDefRows.map(player => renderDefenderRow(player, curDefColor))}

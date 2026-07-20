@@ -88,14 +88,8 @@ export default function App() {
       if (e.target instanceof HTMLInputElement) return
       if (e.code === 'Space') {
         e.preventDefault()
-        const { isPlaying, isVideoPlaying, setPlaying, setVideoPlaying } = useStore.getState()
-        if (isPlaying && isVideoPlaying) {
-          setPlaying(false); setVideoPlaying(false)         // both running → stop both
-        } else if (isPlaying || isVideoPlaying) {
-          setPlaying(false); setVideoPlaying(false)         // one running → stop all
-        } else {
-          setPlaying(true)                                  // nothing running → start animation
-        }
+        const { isPlaying, setPlaying } = useStore.getState()
+        setPlaying(!isPlaying)
       }
       if (e.code === 'ArrowRight') {
         useStore.getState().setCurrentFrame(
@@ -218,6 +212,9 @@ export default function App() {
 
       <TopBar onNewSession={() => setPage('home')} />
 
+      {/* Tracking timeline — full width for finer control */}
+      <PlaybackControls />
+
       {/* Top row: [Video | divider | Court | Roster] */}
       <div style={{ display: 'flex', flexShrink: 0, height: topPx, minHeight: 0 }}>
         {/* Video panel — resizable width */}
@@ -236,16 +233,14 @@ export default function App() {
             justifyContent: 'center', userSelect: 'none', zIndex: 10,
           }}
         >
-          <span style={{ color: '#333', fontSize: 10, writingMode: 'vertical-rl', letterSpacing: 2 }}>⠿</span>
+          <span style={{ color: 'var(--divider-fg)', fontSize: 10, writingMode: 'vertical-rl', letterSpacing: 2 }}>⠿</span>
         </div>
 
-        {/* Court + tracking timeline column — takes remaining space */}
+        {/* Court — takes remaining space */}
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
           <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
             <CourtCanvas />
           </div>
-          {/* Tracking timeline sits directly below the court canvas */}
-          <PlaybackControls />
         </div>
 
         {/* Drag handle between court and roster */}
@@ -259,7 +254,7 @@ export default function App() {
             justifyContent: 'center', userSelect: 'none', zIndex: 10,
           }}
         >
-          <span style={{ color: '#333', fontSize: 10, writingMode: 'vertical-rl', letterSpacing: 2 }}>⠿</span>
+          <span style={{ color: 'var(--divider-fg)', fontSize: 10, writingMode: 'vertical-rl', letterSpacing: 2 }}>⠿</span>
         </div>
 
         {/* Roster — resizable */}
@@ -282,7 +277,7 @@ export default function App() {
           userSelect: 'none', zIndex: 10,
         }}
       >
-        <span style={{ color: '#333', fontSize: 10, letterSpacing: 4 }}>⠿</span>
+        <span style={{ color: 'var(--divider-fg)', fontSize: 10, letterSpacing: 4 }}>⠿</span>
       </div>
 
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>

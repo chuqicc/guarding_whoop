@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Stage, Layer, Image as KonvaImage, Circle, Text, Arrow, Group } from 'react-konva'
 import { useStore } from '../store/useStore'
 import { COURT_W, COURT_H, COLOR_TEAM_A, COLOR_TEAM_B, COLOR_BALL, QUARTER_BUCKET_S } from '../constants'
+import { toggleBtnStyle } from '../utils/buttonStyle'
 import courtPng from '../assets/court.png'
 
 const COURT_ASPECT = COURT_W / COURT_H   // 94 / 50 = 1.88
@@ -50,8 +51,12 @@ export default function CourtCanvas() {
   const possession         = useStore(s => s.possession)
   const quarterMeta        = useStore(s => s.quarterMeta)
   const mode               = useStore(s => s.mode)
+  const theme              = useStore(s => s.theme)
   const setCellAnnotation       = useStore(s => s.setCellAnnotation)
-  const signalCourtAssignment   = useStore(s => s.signalCourtAssignment)
+
+  // Canvas strokes can't resolve CSS variables — mirror the index.css tokens per theme
+  const selectionRingColor = theme === 'light' ? '#1a1d2a' : '#ffffff'
+  const hoverRingColor     = theme === 'light' ? '#c08a2c' : '#ffd700'
 
   const meta = possession ?? quarterMeta
 
@@ -114,7 +119,6 @@ export default function CourtCanvas() {
     } else if (selectedDefId !== null) {
       // Assign: selected defender → clicked attacker
       setCellAnnotation(selectedDefId, playerId, currentBucket)
-      signalCourtAssignment(selectedDefId, playerId)
       setSelectedDefId(null)
     }
   }
@@ -142,8 +146,8 @@ export default function CourtCanvas() {
         flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: 3,
         padding: '3px 6px', background: 'var(--bg-surface)', borderBottom: '1px solid var(--border)',
       }}>
-        <button onClick={toggleFlipX} title={flipX ? 'Undo left↔right flip' : 'Flip left↔right'} style={flipBtnStyle(flipX)}>⇆</button>
-        <button onClick={toggleFlipY} title={flipY ? 'Undo top↔bottom flip' : 'Flip top↔bottom'} style={flipBtnStyle(flipY)}>⇅</button>
+        <button onClick={toggleFlipX} title={flipX ? 'Undo left↔right flip' : 'Flip left↔right'} style={{ ...toggleBtnStyle(flipX, 'warn'), fontSize: 14, lineHeight: '1' }}>⇆</button>
+        <button onClick={toggleFlipY} title={flipY ? 'Undo top↔bottom flip' : 'Flip top↔bottom'} style={{ ...toggleBtnStyle(flipY, 'warn'), fontSize: 14, lineHeight: '1' }}>⇅</button>
       </div>
 
     <div
@@ -155,7 +159,7 @@ export default function CourtCanvas() {
         <div style={{
           position: 'absolute', bottom: offsetY + 6, left: offsetX + 8,
           zIndex: 20, fontSize: 11, color: '#fff',
-          background: 'rgba(74,144,217,0.75)', borderRadius: 4, padding: '2px 8px',
+          background: 'var(--selection-hint-bg)', borderRadius: 4, padding: '2px 8px',
           pointerEvents: 'none',
         }}>
           Click attacker to assign · Esc to cancel · Dbl-click defender for ∅
@@ -248,10 +252,10 @@ export default function CourtCanvas() {
               const isHovered  = hoveredId === p.id
               const defending  = isDefenderFn(p.teamId)
 
-              // Highlight: selected = white ring, hovered attacker (when selecting) = yellow ring
+              // Highlight: selected = selection ring, hovered attacker (when selecting) = hover ring
               const strokeColor = isSelected
-                ? '#ffffff'
-                : (selectedDefId !== null && !defending && isHovered) ? '#ffd700' : 'transparent'
+                ? selectionRingColor
+                : (selectedDefId !== null && !defending && isHovered) ? hoverRingColor : 'transparent'
               const strokeW = (isSelected || (selectedDefId !== null && !defending && isHovered)) ? 2.5 : 0
               const radius  = isSelected ? playerR * 1.15 : playerR
 
@@ -304,15 +308,4 @@ export default function CourtCanvas() {
     </div>
     </div>
   )
-}
-
-function flipBtnStyle(active: boolean): React.CSSProperties {
-  return {
-    background: active ? '#c8860a' : 'var(--bg-panel)',
-    color: active ? '#fff' : 'var(--text-3)',
-    border: `1px solid ${active ? '#c8860a' : 'var(--border)'}`,
-    borderRadius: 4, padding: '2px 6px',
-    cursor: 'pointer', fontSize: 14, lineHeight: '1',
-    userSelect: 'none',
-  }
 }

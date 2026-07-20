@@ -100,16 +100,16 @@ export default function UploadPage({ onPossession:_onPossession, onQuarter, onSp
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{
               width: 22, height: 22, borderRadius: '50%',
-              background: playerLoaded ? '#3a7a3a' : 'var(--bg-inter)',
-              border: `1px solid ${playerLoaded ? '#5cb85c' : 'var(--border)'}`,
+              background: playerLoaded ? 'var(--accent-success-bg)' : 'var(--bg-inter)',
+              border: `1px solid ${playerLoaded ? 'var(--accent-success)' : 'var(--border)'}`,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 11, color: playerLoaded ? '#5cb85c' : 'var(--text-3)', flexShrink: 0,
+              fontSize: 11, color: playerLoaded ? 'var(--accent-success)' : 'var(--text-3)', flexShrink: 0,
             }}>
               {playerLoaded ? '✓' : '1'}
             </span>
             <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)' }}>Player Database</span>
             {playerLoaded && (
-              <span style={{ fontSize: 11, color: '#5cb85c', marginLeft: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>
+              <span style={{ fontSize: 11, color: 'var(--accent-success)', marginLeft: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>
                 {pdataCached ? `${pdataName} · cached` : (pdataName ?? 'Loaded')}
               </span>
             )}
@@ -125,7 +125,7 @@ export default function UploadPage({ onPossession:_onPossession, onQuarter, onSp
         </div>
 
         {error && (
-          <div style={{ fontSize: 12, color: '#e05c5c', padding: '6px 10px', background: 'var(--bg-surface)', borderRadius: 4 }}>
+          <div style={{ fontSize: 12, color: 'var(--accent-danger)', padding: '6px 10px', background: 'var(--bg-surface)', borderRadius: 4 }}>
             {error}
           </div>
         )}
@@ -192,10 +192,10 @@ function PlayerDropZone({ playerLoaded, inputRef, onFile }: {
         height: 52, borderRadius: 6, cursor: 'pointer',
         background: dragOver ? 'var(--bg-surface)' : (playerLoaded ? 'var(--bg-inter)' : 'var(--bg-page)'),
         border: dragOver
-          ? '1.5px solid #4a90d9'
-          : playerLoaded ? '1.5px solid #3a7a3a' : '1.5px dashed var(--border)',
+          ? '1.5px solid var(--accent)'
+          : playerLoaded ? '1.5px solid var(--accent-success-bg)' : '1.5px dashed var(--border)',
         fontSize: 12,
-        color: playerLoaded ? '#5cb85c' : 'var(--text-3)',
+        color: playerLoaded ? 'var(--accent-success)' : 'var(--text-3)',
         gap: 8, transition: 'all 0.15s',
       }}
     >

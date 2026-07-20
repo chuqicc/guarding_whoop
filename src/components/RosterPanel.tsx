@@ -35,7 +35,7 @@ export default function RosterPanel() {
         <span style={{ fontSize: 12, color: 'var(--text-3)' }}>Roster</span>
         <button
           onClick={toggleDefendingTeam}
-          style={{ background: '#2a3a5a', color: '#bbb', border: 'none', padding: '2px 8px', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}
+          style={{ background: 'var(--mode-off-bg)', color: 'var(--text-1)', border: 'none', padding: '2px 8px', borderRadius: 4, cursor: 'pointer', fontSize: 12 }}
         >
           ⇄ Swap teams
         </button>

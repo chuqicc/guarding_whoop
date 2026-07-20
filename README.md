@@ -26,6 +26,11 @@ Load a full-quarter SportVU tracking JSON file and annotate every defender's ass
 - All panels (video, court, roster, annotation table) are resizable via drag handles
 - Export results as CSV or JSON, keyed by frame and moment ID for direct join with tracking data
 - Re-import a previously exported JSON or CSV annotation file to resume/edit a session
+- Dead-time buckets are locked: no defensive assignment can be entered (or auto-filled) while the ball is dead
+- **🧠 Memory** toggle in the top bar: when ON, each new bucket auto-fills every defender's previous assignment; when OFF, buckets stay empty until assigned manually
+- Swapping the defending team wipes the auto-fill memory — assignments from before the swap are never carried forward
+- Mark **🏀 Shot** and **↩ Rebound** events per bucket in the annotation table; the flags export to CSV (`is_shot` / `is_rebound` columns) and JSON (`events` array)
+- Concise JSON export format (`guard-annotation/v2`): one entry per time bucket with frame/moment ranges instead of one entry per frame; player names are stored once in `meta.players`
 
 ### Video Quarter Splitter
 Split a full-game video file into individual quarter clips.

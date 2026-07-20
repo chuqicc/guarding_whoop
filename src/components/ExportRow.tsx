@@ -1,8 +1,8 @@
 import { useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
-import type { CellAnnotation } from '../store/useStore'
 import { exportJSON, exportFrameCSV } from '../utils/export'
 import { parseAnnotationCSV } from '../utils/importCSV'
+import { parseAnnotationJSON } from '../utils/importJSON'
 
 interface Props {
   onNewSession: () => void
@@ -14,9 +14,15 @@ export default function ExportRow({ onNewSession }: Props) {
   const frames            = useStore(s => s.frames)
   const cellAnnotations   = useStore(s => s.cellAnnotations)
   const deadTimeBuckets   = useStore(s => s.deadTimeBuckets)
+  const shotBuckets       = useStore(s => s.shotBuckets)
+  const reboundBuckets    = useStore(s => s.reboundBuckets)
+  const restoreImported   = useStore(s => s.restoreImported)
   const playerDict        = useStore(s => s.playerDict)
   const setCellAnnotations = useStore(s => s.setCellAnnotations)
   const loadPossession   = useStore(s => s.loadPossession)
+  const annotatorName    = useStore(s => s.annotatorName)
+  const annotationSeconds = useStore(s => s.annotationSeconds)
+  const notes             = useStore(s => s.notes)
 
   const [possessionFile, setPossessionFile] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -45,14 +51,8 @@ export default function ExportRow({ onNewSession }: Props) {
   const handleImportJSON = async (file: File) => {
     try {
       const text = await readFile(file)
-      const data = JSON.parse(text)
-      const anns: CellAnnotation[] = data.pairs?.map((p: Record<string, unknown>) => ({
-        id: (p.id as string) ?? String(Math.random()),
-        defenderId: p.defender_id as number,
-        attackerId: p.attacker_id === null ? 'GUARD_NONE' : p.attacker_id as number,
-        shotClockBucket: p.shot_clock_second as number,
-      })) ?? []
-      setCellAnnotations(anns)
+      const imported = parseAnnotationJSON(text, mode === 'quarter')
+      restoreImported(imported)
       setError(null)
     } catch (e) { setError(`Failed to import annotations: ${e}`) }
   }
@@ -112,12 +112,12 @@ export default function ExportRow({ onNewSession }: Props) {
 
       {/* Export buttons */}
       <button disabled={!canExport}
-        onClick={() => possession && exportJSON(cellAnnotations, deadTimeBuckets, frames, possession, playerDict)}
+        onClick={() => possession && exportJSON({ annotations: cellAnnotations, deadTimeBuckets, shotBuckets, reboundBuckets, frames, meta: possession, playerDict, annotatorName, annotationSeconds, notes })}
         style={actionBtnStyle(canExport)}>
         ⬇ JSON
       </button>
       <button disabled={!canExport}
-        onClick={() => possession && exportFrameCSV(cellAnnotations, deadTimeBuckets, frames, possession, playerDict)}
+        onClick={() => possession && exportFrameCSV({ annotations: cellAnnotations, deadTimeBuckets, shotBuckets, reboundBuckets, frames, meta: possession, playerDict, annotatorName, annotationSeconds, notes })}
         style={actionBtnStyle(canExport)}>
         ⬇ CSV
       </button>

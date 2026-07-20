@@ -120,7 +120,7 @@ export default function PossessionSetupPage({ onStart, onBack }: Props) {
         />
 
         {error && (
-          <div style={{ fontSize: 12, color: '#e05c5c', padding: '6px 10px', background: 'var(--bg-surface)', borderRadius: 4 }}>
+          <div style={{ fontSize: 12, color: 'var(--accent-danger)', padding: '6px 10px', background: 'var(--bg-surface)', borderRadius: 4 }}>
             {error}
           </div>
         )}
@@ -130,7 +130,7 @@ export default function PossessionSetupPage({ onStart, onBack }: Props) {
           onClick={onStart}
           style={{
             padding: '12px 0', borderRadius: 6, border: 'none',
-            background: canStart ? '#4a90d9' : 'var(--bg-surface)',
+            background: canStart ? 'var(--accent)' : 'var(--bg-surface)',
             color: canStart ? 'white' : 'var(--text-4)',
             fontSize: 15, fontWeight: 600,
             cursor: canStart ? 'pointer' : 'not-allowed',
@@ -167,10 +167,10 @@ function UploadStep({ number, title, required, status, statusLabel, hint, dropLa
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{
           width: 22, height: 22, borderRadius: '50%',
-          background: status === 'loaded' ? '#3a7a3a' : 'var(--bg-inter)',
-          border: `1px solid ${status === 'loaded' ? '#5cb85c' : 'var(--border)'}`,
+          background: status === 'loaded' ? 'var(--accent-success-bg)' : 'var(--bg-inter)',
+          border: `1px solid ${status === 'loaded' ? 'var(--accent-success)' : 'var(--border)'}`,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 11, color: status === 'loaded' ? '#5cb85c' : 'var(--text-3)',
+          fontSize: 11, color: status === 'loaded' ? 'var(--accent-success)' : 'var(--text-3)',
           flexShrink: 0,
         }}>
           {status === 'loaded' ? '✓' : number}
@@ -178,7 +178,7 @@ function UploadStep({ number, title, required, status, statusLabel, hint, dropLa
         <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)' }}>{title}</span>
         {!required && <span style={{ fontSize: 11, color: 'var(--text-4)', marginLeft: 2 }}>(optional)</span>}
         {statusLabel && (
-          <span style={{ fontSize: 11, color: '#5cb85c', marginLeft: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>
+          <span style={{ fontSize: 11, color: 'var(--accent-success)', marginLeft: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 200 }}>
             {statusLabel}
           </span>
         )}
@@ -193,12 +193,12 @@ function UploadStep({ number, title, required, status, statusLabel, hint, dropLa
           height: 56, borderRadius: 6, cursor: 'pointer',
           background: dragOver ? 'var(--bg-surface)' : (status === 'loaded' ? 'var(--bg-inter)' : 'var(--bg-page)'),
           border: dragOver
-            ? '1.5px solid #4a90d9'
+            ? '1.5px solid var(--accent)'
             : status === 'loaded'
-              ? '1.5px solid #3a7a3a'
+              ? '1.5px solid var(--accent-success-bg)'
               : '1.5px dashed var(--border)',
           fontSize: 12,
-          color: status === 'loaded' ? '#5cb85c' : 'var(--text-3)',
+          color: status === 'loaded' ? 'var(--accent-success)' : 'var(--text-3)',
           gap: 8, transition: 'all 0.15s',
         }}
       >

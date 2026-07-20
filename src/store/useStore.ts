@@ -2,7 +2,6 @@ import { create } from 'zustand'
 import { v4 as uuid } from 'uuid'
 import { parsePlayerDict, parsePossession } from '../utils/parseCSV'
 import { parseQuarterJSON } from '../utils/parseQuarterJSON'
-import { detectGaps } from '../utils/videoSync'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -50,17 +49,6 @@ export interface QuarterMeta {
   endClock: number
 }
 
-export interface SyncPoint {
-  id: string
-  frame: number       // tracking frameIndex
-  videoTime: number   // video.currentTime at this frame
-}
-
-export interface GapInfo {
-  frameIndex: number   // frame AFTER which the dead-ball gap begins
-  clockJump: number    // seconds of clock time skipped
-}
-
 // attackerId: player id number, or 'GUARD_NONE' for "guarding no one"
 export type AttackerId = number | 'GUARD_NONE'
 
@@ -70,6 +58,16 @@ export interface CellAnnotation {
   defenderId: number
   attackerId: AttackerId
   shotClockBucket: number   // integer = Math.floor(shot_clock) or Math.floor(quarterClock)
+  confidence?: 1 | 2 | 3    // 3 = certain (default), 2 = fairly sure, 1 = unsure
+}
+
+// Free-text observation tied to a moment in the timeline (protocol §11 "Notes")
+export interface AnnotationNote {
+  id: string
+  bucket: number
+  defenderId?: number
+  text: string
+  createdAt: string
 }
 
 interface AppStore {
@@ -89,14 +87,18 @@ interface AppStore {
   // ── Annotation ──
   cellAnnotations: CellAnnotation[]
   deadTimeBuckets: number[]        // bucket keys marked as dead time (no live play)
+  shotBuckets: number[]            // bucket keys marked with a shot attempt (出手)
+  reboundBuckets: number[]         // bucket keys marked with a rebound (篮板)
+
+  // ── Auto-fill memory (carry previous bucket's assignments forward) ──
+  autoFillMemory: boolean          // toggleable; false = never auto-fill
+  memoryBarrierFrames: number[]    // frame indices where defense swapped; auto-fill never crosses these
 
   // ── Restore ──
   pendingRestore: CellAnnotation[] | null
 
   // ── Video ──
   videoUrl: string | null
-  syncPoints: SyncPoint[]    // multi-keyframe sync (replaces single videoOffset)
-  gapFrames: GapInfo[]       // auto-detected dead-ball gap positions
 
   // ── Court display ──
   flipX: boolean
@@ -105,51 +107,76 @@ interface AppStore {
   // ── Theme ──
   theme: 'dark' | 'light'
 
-  // ── Court click-to-assign signal (consumed by RosterPanel to sync defOrder) ──
-  lastCourtAssignment: { defId: number; attId: number } | null
+  // ── Annotation protocol metadata ──
+  notes: AnnotationNote[]
+  annotatorName: string
+  annotationSeconds: number
 
   // ── Actions ──
   loadPlayerDict: (csvText: string) => void
   loadPossession: (csvText: string, filename: string) => void
   loadQuarter: (jsonText: string, filename: string) => void
   toggleDeadTimeBucket: (bucket: number) => void
+  toggleShotBucket: (bucket: number) => void
+  toggleReboundBucket: (bucket: number) => void
+  toggleAutoFillMemory: () => void
+  restoreImported: (data: { annotations: CellAnnotation[]; deadTimeBuckets?: number[]; shotBuckets?: number[]; reboundBuckets?: number[] }) => void
   setCurrentFrame:   (n: number) => void
   setPlaying:        (v: boolean) => void
   setVideoPlaying:   (v: boolean) => void
   setSpeed:          (v: number) => void
   toggleDefendingTeam: () => void
-  setCellAnnotation: (defenderId: number, attackerId: AttackerId, bucket: number) => void
+  setCellAnnotation: (defenderId: number, attackerId: AttackerId, bucket: number, confidence?: 1 | 2 | 3) => void
+  setCellConfidence: (defenderId: number, bucket: number, confidence: 1 | 2 | 3) => void
   removeCellAnnotation: (id: string) => void
   setCellAnnotations: (anns: CellAnnotation[]) => void  // for import / restore
   clearBucketAnnotations: (bucket: number) => void
   dismissRestore: () => void
   setVideoUrl: (url: string | null) => void
-  addSyncPoint:    (frame: number, videoTime: number) => void
-  removeSyncPoint: (id: string) => void
-  clearSyncPoints: () => void
   toggleFlipX: () => void
   toggleFlipY: () => void
   toggleTheme: () => void
-  signalCourtAssignment: (defId: number, attId: number) => void
+  addNote: (bucket: number, text: string, defenderId?: number) => void
+  removeNote: (id: string) => void
+  setAnnotatorName: (name: string) => void
+  incrementAnnotationTime: (delta: number) => void
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function syncKey(possession: PossessionMeta | null, quarterMeta: QuarterMeta | null): string | null {
-  if (possession)  return `syncpoints_${possession.filename}`
-  if (quarterMeta) return `syncpoints_quarter_${quarterMeta.filename}`
+function fileKey(prefix: string, possession: PossessionMeta | null, quarterMeta: QuarterMeta | null): string | null {
+  if (possession)  return `${prefix}_${possession.filename}`
+  if (quarterMeta) return `${prefix}_quarter_${quarterMeta.filename}`
   return null
 }
 
-function loadSyncPoints(key: string | null): SyncPoint[] {
+function loadNotes(key: string | null): AnnotationNote[] {
   if (!key) return []
   try {
     const raw = localStorage.getItem(key)
     if (!raw) return []
     const parsed = JSON.parse(raw)
-    if (Array.isArray(parsed)) return parsed as SyncPoint[]
+    if (Array.isArray(parsed)) return parsed as AnnotationNote[]
   } catch { /* ignore */ }
   return []
+}
+
+function loadNumberArray(key: string | null): number[] {
+  if (!key) return []
+  try {
+    const raw = localStorage.getItem(key)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed)) return parsed.filter(n => typeof n === 'number')
+  } catch { /* ignore */ }
+  return []
+}
+
+function loadNumber(key: string | null): number {
+  if (!key) return 0
+  const raw = localStorage.getItem(key)
+  const n = raw ? parseFloat(raw) : 0
+  return isNaN(n) ? 0 : n
 }
 
 // ── Store ──────────────────────────────────────────────────────────────────
@@ -166,14 +193,18 @@ export const useStore = create<AppStore>((set, get) => ({
   playbackSpeed: 1,
   cellAnnotations: [],
   deadTimeBuckets: [],
+  shotBuckets: [],
+  reboundBuckets: [],
+  autoFillMemory: localStorage.getItem('autoFillMemory') !== 'off',
+  memoryBarrierFrames: [],
   pendingRestore: null,
   videoUrl: null,
-  syncPoints: [],
-  gapFrames: [],
   flipX: false,
   flipY: false,
   theme: 'dark' as const,
-  lastCourtAssignment: null,
+  notes: [],
+  annotatorName: localStorage.getItem('annotatorName') ?? '',
+  annotationSeconds: 0,
 
   loadPlayerDict: (csvText) => {
     const dict = parsePlayerDict(csvText)
@@ -196,10 +227,12 @@ export const useStore = create<AppStore>((set, get) => ({
     }
     const deadSaved = localStorage.getItem(`deadtime_${possession.filename}`)
     const deadTimeBuckets: number[] = deadSaved ? JSON.parse(deadSaved) : []
-    const gapFrames = detectGaps(frames)
-    const spKey = `syncpoints_${possession.filename}`
-    const syncPoints = loadSyncPoints(spKey)
-    set({ frames, possession, quarterMeta: null, mode: 'possession', currentFrame: 0, isPlaying: false, cellAnnotations: [], deadTimeBuckets, gapFrames, syncPoints, pendingRestore })
+    const shotBuckets    = loadNumberArray(`shot_${possession.filename}`)
+    const reboundBuckets = loadNumberArray(`rebound_${possession.filename}`)
+    const memoryBarrierFrames = loadNumberArray(`membarrier_${possession.filename}`)
+    const notes = loadNotes(`notes_${possession.filename}`)
+    const annotationSeconds = loadNumber(`anntime_${possession.filename}`)
+    set({ frames, possession, quarterMeta: null, mode: 'possession', currentFrame: 0, isPlaying: false, cellAnnotations: [], deadTimeBuckets, shotBuckets, reboundBuckets, memoryBarrierFrames, pendingRestore, notes, annotationSeconds })
   },
 
   loadQuarter: (jsonText, filename) => {
@@ -217,10 +250,12 @@ export const useStore = create<AppStore>((set, get) => ({
     }
     const deadSaved = localStorage.getItem(`deadtime_quarter_${quarterMeta.filename}`)
     const deadTimeBuckets: number[] = deadSaved ? JSON.parse(deadSaved) : []
-    const gapFrames = detectGaps(frames)
-    const spKey = `syncpoints_quarter_${quarterMeta.filename}`
-    const syncPoints = loadSyncPoints(spKey)
-    set({ frames, quarterMeta, possession: null, playerDict, mode: 'quarter', currentFrame: 0, isPlaying: false, cellAnnotations: [], deadTimeBuckets, gapFrames, syncPoints, pendingRestore })
+    const shotBuckets    = loadNumberArray(`shot_quarter_${quarterMeta.filename}`)
+    const reboundBuckets = loadNumberArray(`rebound_quarter_${quarterMeta.filename}`)
+    const memoryBarrierFrames = loadNumberArray(`membarrier_quarter_${quarterMeta.filename}`)
+    const notes = loadNotes(`notes_quarter_${quarterMeta.filename}`)
+    const annotationSeconds = loadNumber(`anntime_quarter_${quarterMeta.filename}`)
+    set({ frames, quarterMeta, possession: null, playerDict, mode: 'quarter', currentFrame: 0, isPlaying: false, cellAnnotations: [], deadTimeBuckets, shotBuckets, reboundBuckets, memoryBarrierFrames, pendingRestore, notes, annotationSeconds })
   },
 
   setCurrentFrame:  (n) => set({ currentFrame: n }),
@@ -229,26 +264,56 @@ export const useStore = create<AppStore>((set, get) => ({
   setSpeed:         (v) => set({ playbackSpeed: v }),
 
   toggleDefendingTeam: () => {
-    const { possession, quarterMeta } = get()
+    const { possession, quarterMeta, currentFrame, memoryBarrierFrames } = get()
+    // Swapping possession wipes the auto-fill memory: record a barrier at the
+    // current frame so assignments from before the swap are never carried forward.
+    const barriers = memoryBarrierFrames.includes(currentFrame)
+      ? memoryBarrierFrames
+      : [...memoryBarrierFrames, currentFrame].sort((a, b) => a - b)
     if (possession) {
       const newDefId = possession.defendingTeamId === possession.teamA.teamId
         ? possession.teamB.teamId : possession.teamA.teamId
-      set({ possession: { ...possession, defendingTeamId: newDefId } })
+      set({ possession: { ...possession, defendingTeamId: newDefId }, memoryBarrierFrames: barriers })
     } else if (quarterMeta) {
       const newDefId = quarterMeta.defendingTeamId === quarterMeta.teamA.teamId
         ? quarterMeta.teamB.teamId : quarterMeta.teamA.teamId
-      set({ quarterMeta: { ...quarterMeta, defendingTeamId: newDefId } })
+      set({ quarterMeta: { ...quarterMeta, defendingTeamId: newDefId }, memoryBarrierFrames: barriers })
     }
+    const key = fileKey('membarrier', get().possession, get().quarterMeta)
+    if (key) localStorage.setItem(key, JSON.stringify(get().memoryBarrierFrames))
   },
 
-  setCellAnnotation: (defenderId, attackerId, bucket) => {
+  setCellAnnotation: (defenderId, attackerId, bucket, confidence) => {
+    // Dead-time buckets never accept assignments (hard rule, feature #1)
+    if (get().deadTimeBuckets.includes(bucket)) return
     set(s => {
+      const existing = s.cellAnnotations.find(
+        c => c.defenderId === defenderId && c.shotClockBucket === bucket
+      )
       const filtered = s.cellAnnotations.filter(
         c => !(c.defenderId === defenderId && c.shotClockBucket === bucket)
       )
-      const newAnn: CellAnnotation = { id: uuid(), defenderId, attackerId, shotClockBucket: bucket }
+      const newAnn: CellAnnotation = {
+        id: uuid(), defenderId, attackerId, shotClockBucket: bucket,
+        confidence: confidence ?? existing?.confidence,
+      }
       return { cellAnnotations: [...filtered, newAnn] }
     })
+    const { possession, quarterMeta, cellAnnotations } = get()
+    const lsKey = possession
+      ? `annotation_${possession.filename}`
+      : quarterMeta ? `annotation_quarter_${quarterMeta.filename}` : null
+    if (lsKey) localStorage.setItem(lsKey, JSON.stringify(cellAnnotations))
+  },
+
+  setCellConfidence: (defenderId, bucket, confidence) => {
+    set(s => ({
+      cellAnnotations: s.cellAnnotations.map(c =>
+        c.defenderId === defenderId && c.shotClockBucket === bucket
+          ? { ...c, confidence }
+          : c
+      ),
+    }))
     const { possession, quarterMeta, cellAnnotations } = get()
     const lsKey = possession
       ? `annotation_${possession.filename}`
@@ -290,43 +355,89 @@ export const useStore = create<AppStore>((set, get) => ({
     if (key) localStorage.setItem(key, JSON.stringify(deadTimeBuckets))
   },
 
+  toggleShotBucket: (bucket) => {
+    set(s => ({
+      shotBuckets: s.shotBuckets.includes(bucket)
+        ? s.shotBuckets.filter(b => b !== bucket)
+        : [...s.shotBuckets, bucket],
+    }))
+    const { possession, quarterMeta, shotBuckets } = get()
+    const key = fileKey('shot', possession, quarterMeta)
+    if (key) localStorage.setItem(key, JSON.stringify(shotBuckets))
+  },
+
+  toggleReboundBucket: (bucket) => {
+    set(s => ({
+      reboundBuckets: s.reboundBuckets.includes(bucket)
+        ? s.reboundBuckets.filter(b => b !== bucket)
+        : [...s.reboundBuckets, bucket],
+    }))
+    const { possession, quarterMeta, reboundBuckets } = get()
+    const key = fileKey('rebound', possession, quarterMeta)
+    if (key) localStorage.setItem(key, JSON.stringify(reboundBuckets))
+  },
+
+  toggleAutoFillMemory: () => {
+    const next = !get().autoFillMemory
+    set({ autoFillMemory: next })
+    localStorage.setItem('autoFillMemory', next ? 'on' : 'off')
+  },
+
+  restoreImported: ({ annotations, deadTimeBuckets, shotBuckets, reboundBuckets }) => {
+    set(s => ({
+      cellAnnotations: annotations,
+      deadTimeBuckets: deadTimeBuckets ?? s.deadTimeBuckets,
+      shotBuckets:     shotBuckets     ?? s.shotBuckets,
+      reboundBuckets:  reboundBuckets  ?? s.reboundBuckets,
+    }))
+    const { possession, quarterMeta } = get()
+    const save = (prefix: string, value: unknown) => {
+      const key = fileKey(prefix, possession, quarterMeta)
+      if (key) localStorage.setItem(key, JSON.stringify(value))
+    }
+    save('annotation', get().cellAnnotations)
+    save('deadtime',   get().deadTimeBuckets)
+    save('shot',       get().shotBuckets)
+    save('rebound',    get().reboundBuckets)
+  },
+
   dismissRestore: () => set({ pendingRestore: null }),
 
   setVideoUrl: (url) => {
     const prev = get().videoUrl
     if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev)
-    // Sync points are keyed to tracking data, not the video — keep them on video swap
     set({ videoUrl: url })
-  },
-
-  addSyncPoint: (frame, videoTime) => {
-    set(s => {
-      const sp: SyncPoint = { id: uuid(), frame, videoTime }
-      const filtered = s.syncPoints.filter(p => p.frame !== frame)
-      const next = [...filtered, sp].sort((a, b) => a.frame - b.frame)
-      return { syncPoints: next }
-    })
-    const { possession, quarterMeta, syncPoints } = get()
-    const key = syncKey(possession, quarterMeta)
-    if (key) localStorage.setItem(key, JSON.stringify(syncPoints))
-  },
-
-  removeSyncPoint: (id) => {
-    set(s => ({ syncPoints: s.syncPoints.filter(p => p.id !== id) }))
-    const { possession, quarterMeta, syncPoints } = get()
-    const key = syncKey(possession, quarterMeta)
-    if (key) localStorage.setItem(key, JSON.stringify(syncPoints))
-  },
-
-  clearSyncPoints: () => {
-    set({ syncPoints: [] })
-    const { possession, quarterMeta } = get()
-    const key = syncKey(possession, quarterMeta)
-    if (key) localStorage.setItem(key, JSON.stringify([]))
   },
 
   toggleFlipX: () => set(s => ({ flipX: !s.flipX })),
   toggleFlipY: () => set(s => ({ flipY: !s.flipY })),
   toggleTheme: () => set(s => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
-  signalCourtAssignment: (defId, attId) => set({ lastCourtAssignment: { defId, attId } }),
+
+  addNote: (bucket, text, defenderId) => {
+    set(s => ({
+      notes: [...s.notes, { id: uuid(), bucket, defenderId, text, createdAt: new Date().toISOString() }],
+    }))
+    const { possession, quarterMeta, notes } = get()
+    const key = fileKey('notes', possession, quarterMeta)
+    if (key) localStorage.setItem(key, JSON.stringify(notes))
+  },
+
+  removeNote: (id) => {
+    set(s => ({ notes: s.notes.filter(n => n.id !== id) }))
+    const { possession, quarterMeta, notes } = get()
+    const key = fileKey('notes', possession, quarterMeta)
+    if (key) localStorage.setItem(key, JSON.stringify(notes))
+  },
+
+  setAnnotatorName: (name) => {
+    set({ annotatorName: name })
+    localStorage.setItem('annotatorName', name)
+  },
+
+  incrementAnnotationTime: (delta) => {
+    set(s => ({ annotationSeconds: s.annotationSeconds + delta }))
+    const { possession, quarterMeta, annotationSeconds } = get()
+    const key = fileKey('anntime', possession, quarterMeta)
+    if (key) localStorage.setItem(key, String(annotationSeconds))
+  },
 }))

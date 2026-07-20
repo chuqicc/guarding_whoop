@@ -72,6 +72,13 @@ app.post('/api/upload', (req, res) => {
   })
 })
 
+function parseSec(hms) {
+  const parts = String(hms).split(':').map(Number)
+  if (parts.length === 3) return parts[0]*3600 + parts[1]*60 + parts[2]
+  if (parts.length === 2) return parts[0]*60 + parts[1]
+  return parts[0] || 0
+}
+
 // ── POST /api/split ────────────────────────────────────────────────────────
 // Body JSON: { id, ext, quarters: [{ label, startStr, endStr }] }
 // Responds with Server-Sent Events (text/event-stream).
@@ -107,16 +114,22 @@ app.post('/api/split', express.json(), async (req, res) => {
 
     send({ type: 'quarter_start', quarter: q.label })
 
+    // Compute duration so we can use -t (avoids -to timestamp ambiguity with input-side -ss)
+    const startSec = parseSec(q.startStr)
+    const endSec   = parseSec(q.endStr)
+    const durSec   = Math.max(0, endSec - startSec)
+
     await new Promise(resolve => {
       const args = [
+        '-ss', q.startStr,           // input-side seek → nearest keyframe, no start stutter
         '-i', inPath,
-        '-ss', q.startStr,
-        '-to', q.endStr,
+        '-t', String(durSec),        // duration-based cut (unambiguous with input-side -ss)
         '-c', 'copy',
         '-avoid_negative_ts', 'make_zero',
+        '-movflags', '+faststart',   // moov atom at front → no buffering delay before playback
         '-y', outPath,
       ]
-      console.log(`  ✂  ${q.label}: ffmpeg -ss ${q.startStr} -to ${q.endStr}`)
+      console.log(`  ✂  ${q.label}: ffmpeg -ss ${q.startStr} -t ${durSec}s`)
       const proc = spawn(actualFfmpegPath, args)
 
       let totalSec  = 0

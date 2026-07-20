@@ -38,12 +38,13 @@ interface QuarterMark {
   end:      number | null
   startStr: string
   endStr:   string
+  name:     string   // output filename without extension
 }
 
 type QuarterStatus = 'idle' | 'splitting' | 'done' | 'error'
 
 const INIT_QUARTERS: QuarterMark[] = ['Q1','Q2','Q3','Q4'].map(label => ({
-  label, start: null, end: null, startStr: '', endStr: '',
+  label, start: null, end: null, startStr: '', endStr: '', name: `video_${label}`,
 }))
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -76,6 +77,10 @@ export default function VideoSplitPage({ onBack }: { onBack: () => void }) {
 
   // Quarters
   const [quarters,   setQuarters]   = useState<QuarterMark[]>(INIT_QUARTERS)
+
+  // Output folder (File System Access API — Chromium/Electron only)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [dirHandle,  setDirHandle]  = useState<any>(null)
 
   // Split
   const [splitting,   setSplitting]   = useState(false)
@@ -116,11 +121,24 @@ export default function VideoSplitPage({ onBack }: { onBack: () => void }) {
   const loadFile = (file: File) => {
     if (!file.type.startsWith('video/')) return
     if (videoUrl) URL.revokeObjectURL(videoUrl)
+    const baseName = file.name.replace(/\.[^.]+$/, '')
     setVideoFile(file)
     setVideoUrl(URL.createObjectURL(file))
     setVidTime(0); setVidDuration(0); setIsPlaying(false)
     setUploadState('idle'); setUploadPct(0); setUploadId(null)
     setQStatus({}); setQPct({}); setErrors({}); setDoneCount(0)
+    setQuarters(INIT_QUARTERS.map(q => ({ ...q, name: `${baseName}_${q.label}` })))
+  }
+
+  // ── Choose output folder ──────────────────────────────────────────────────
+  const chooseOutputFolder = async () => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const handle = await (window as any).showDirectoryPicker({ mode: 'readwrite' })
+      setDirHandle(handle)
+    } catch {
+      // user cancelled
+    }
   }
 
   // ── Upload to local server ────────────────────────────────────────────────
@@ -207,8 +225,6 @@ export default function VideoSplitPage({ onBack }: { onBack: () => void }) {
     setQStatus(Object.fromEntries(validQuarters.map(q => [q.label, 'idle'])))
     setQPct(Object.fromEntries(validQuarters.map(q => [q.label, 0])))
 
-    const baseName = videoFile?.name.replace(/\.[^.]+$/, '') ?? 'video'
-
     const res = await fetch('/api/split', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -247,13 +263,31 @@ export default function VideoSplitPage({ onBack }: { onBack: () => void }) {
             setQStatus(s => ({ ...s, [evt.quarter]: 'done' }))
             setQPct(p => ({ ...p, [evt.quarter]: 100 }))
             setDoneCount(n => n + 1)
-            // Trigger download via anchor
-            const a = document.createElement('a')
-            a.href = `/api/download/${evt.downloadKey}`
-            a.download = `${baseName}_${evt.quarter}.mp4`
-            document.body.appendChild(a)
-            a.click()
-            document.body.removeChild(a)
+
+            const q = validQuarters.find(x => x.label === evt.quarter)
+            const fileName = (q?.name.trim() || evt.quarter) + '.mp4'
+
+            if (dirHandle) {
+              // Write directly to chosen folder
+              try {
+                const resp = await fetch(`/api/download/${evt.downloadKey}`)
+                const fileHandle = await dirHandle.getFileHandle(fileName, { create: true })
+                const writable = await fileHandle.createWritable()
+                await resp.body!.pipeTo(writable)
+              } catch (err) {
+                console.error('Failed to write to output folder:', err)
+                setErrors(e => ({ ...e, [evt.quarter]: String(err) }))
+                setQStatus(s => ({ ...s, [evt.quarter]: 'error' }))
+              }
+            } else {
+              // Fallback: browser download dialog
+              const a = document.createElement('a')
+              a.href = `/api/download/${evt.downloadKey}`
+              a.download = fileName
+              document.body.appendChild(a)
+              a.click()
+              document.body.removeChild(a)
+            }
           }
           if (evt.type === 'quarter_error') {
             setQStatus(s => ({ ...s, [evt.quarter]: 'error' }))
@@ -293,11 +327,21 @@ export default function VideoSplitPage({ onBack }: { onBack: () => void }) {
                               : '✗ Split server offline — run: npm run dev'}
         </span>
 
-        {videoFile && (
-          <span style={{ fontSize:11, color:'var(--text-3)', marginLeft:'auto' }}>
-            {videoFile.name} · {fmtSize(videoFile.size)}
-          </span>
-        )}
+        <div style={{ display:'flex', alignItems:'center', gap:8, marginLeft:'auto' }}>
+          {videoFile && (
+            <span style={{ fontSize:11, color:'var(--text-3)' }}>
+              {videoFile.name} · {fmtSize(videoFile.size)}
+            </span>
+          )}
+          <button
+            onClick={chooseOutputFolder}
+            title={dirHandle ? `Output: ${dirHandle.name} — click to change` : 'Choose where to save the split videos'}
+            style={{ ...btn(dirHandle ? '#1e3a1e' : undefined), fontSize:11, padding:'3px 10px',
+              color: dirHandle ? '#7ed99e' : 'var(--text-2)' }}
+          >
+            📁 {dirHandle ? dirHandle.name : 'Choose output folder'}
+          </button>
+        </div>
       </div>
 
       {/* ── Body ── */}
@@ -413,7 +457,7 @@ export default function VideoSplitPage({ onBack }: { onBack: () => void }) {
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
             <thead>
               <tr style={{ borderBottom:`1px solid var(--border)` }}>
-                {['Quarter','Start','','End','','Duration','Progress',''].map((h,i) => (
+                {['Quarter','Start','','End','','Duration','Output filename','Progress',''].map((h,i) => (
                   <th key={i} style={{ padding:'4px 8px', textAlign:'left', fontSize:11, color:'var(--text-4)', fontWeight:600 }}>{h}</th>
                 ))}
               </tr>
@@ -452,6 +496,18 @@ export default function VideoSplitPage({ onBack }: { onBack: () => void }) {
 
                     <td style={{ padding:'4px 12px', color: dur ? '#5cb85c' : 'var(--text-4)', fontSize:12, width:70, fontVariantNumeric:'tabular-nums' }}>
                       {fmtMSS(dur)}
+                    </td>
+
+                    {/* Output filename */}
+                    <td style={{ padding:'4px 6px' }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:2 }}>
+                        <input
+                          value={q.name}
+                          onChange={e => setQuarters(prev => prev.map((x,i) => i!==idx ? x : { ...x, name: e.target.value }))}
+                          style={{ ...timeInput(true), width:180, fontFamily:'monospace', fontSize:11 }}
+                        />
+                        <span style={{ fontSize:11, color:'var(--text-4)', flexShrink:0 }}>.mp4</span>
+                      </div>
                     </td>
 
                     {/* Progress bar */}
@@ -503,6 +559,11 @@ export default function VideoSplitPage({ onBack }: { onBack: () => void }) {
             )}
             {!videoFile && (
               <span style={{ fontSize:11, color:'var(--text-4)' }}>↑ Drop a video file above</span>
+            )}
+            {!dirHandle && videoFile && (
+              <span style={{ fontSize:11, color:'var(--text-4)' }}>
+                💡 Choose an output folder (top right) to auto-save — otherwise files go to Downloads
+              </span>
             )}
             {!splitting && doneCount > 0 && Object.values(errors).length === 0 && (
               <span style={{ fontSize:12, color:'#5cb85c' }}>✓ All {doneCount} quarters downloaded!</span>

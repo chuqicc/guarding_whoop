@@ -1,4 +1,5 @@
 import { useStore } from '../store/useStore'
+import { toggleBtnStyle } from '../utils/buttonStyle'
 
 function formatClock(seconds: number): string {
   const m = Math.floor(seconds / 60)
@@ -18,8 +19,6 @@ export default function PlaybackControls() {
   const setSpeed = useStore(s => s.setSpeed)
   const possession  = useStore(s => s.possession)
   const quarterMeta = useStore(s => s.quarterMeta)
-  const gapFrames   = useStore(s => s.gapFrames)
-  const syncPoints  = useStore(s => s.syncPoints)
 
   const frame = frames[currentFrame]
   const quarterClock = frame?.quarterClock ?? 0
@@ -34,18 +33,13 @@ export default function PlaybackControls() {
     setCurrentFrame(Math.min(maxFrame, Math.max(0, currentFrame + delta)))
   }
 
-  // ── Three playback mode handlers ─────────────────────────────────────────
-  const handleAnim = () => {
-    if (isPlaying && !isVideoPlaying) { setPlaying(false) }          // already anim-only → pause
-    else { setPlaying(true); setVideoPlaying(false) }                 // switch to anim-only
-  }
-  const handleVideo = () => {
-    if (isVideoPlaying && !isPlaying) { setVideoPlaying(false) }     // already video-only → pause
-    else { setVideoPlaying(true); setPlaying(false) }                 // switch to video-only
-  }
+  // ── Playback mode handlers ───────────────────────────────────────────────
+  const handleAnim = () => setPlaying(!isPlaying)
+  const handleVideo = () => setVideoPlaying(!isVideoPlaying)
   const handleBoth = () => {
-    if (isPlaying && isVideoPlaying) { setPlaying(false); setVideoPlaying(false) }  // pause both
-    else { setPlaying(true); setVideoPlaying(true) }                  // start both synced
+    const next = !(isPlaying && isVideoPlaying)
+    setPlaying(next)
+    setVideoPlaying(next)
   }
 
   return (
@@ -57,25 +51,25 @@ export default function PlaybackControls() {
         borderBottom: '1px solid var(--border)',
       }}
     >
-      {/* Three play mode buttons */}
+      {/* Play mode buttons */}
       <button
         onClick={handleAnim}
-        title="Play tracking animation only"
-        style={modeBtn(isPlaying && !isVideoPlaying)}
+        title="Play tracking animation"
+        style={toggleBtnStyle(isPlaying, 'mode')}
       >
-        {isPlaying && !isVideoPlaying ? '⏸' : '▶'} Anim
+        {isPlaying ? '⏸' : '▶'} Anim
       </button>
       <button
         onClick={handleVideo}
-        title="Play video only (no animation)"
-        style={modeBtn(isVideoPlaying && !isPlaying)}
+        title="Play video"
+        style={toggleBtnStyle(isVideoPlaying, 'mode')}
       >
-        {isVideoPlaying && !isPlaying ? '⏸' : '▶'} Video
+        {isVideoPlaying ? '⏸' : '▶'} Video
       </button>
       <button
         onClick={handleBoth}
-        title="Play both synced"
-        style={modeBtn(isPlaying && isVideoPlaying)}
+        title="Play animation and video together"
+        style={toggleBtnStyle(isPlaying && isVideoPlaying, 'mode')}
       >
         {isPlaying && isVideoPlaying ? '⏸' : '▶'} Both
       </button>
@@ -103,11 +97,8 @@ export default function PlaybackControls() {
           key={s}
           onClick={() => setSpeed(s)}
           style={{
-            background: playbackSpeed === s ? '#c8860a' : 'var(--bg-surface)',
-            color: playbackSpeed === s ? 'white' : 'var(--text-2)',
-            border: '1px solid var(--border)',
-            padding: '2px 8px', borderRadius: 4, cursor: 'pointer', fontSize: 12,
-            flexShrink: 0,
+            ...toggleBtnStyle(playbackSpeed === s, 'warn'),
+            padding: '2px 8px', fontSize: 12,
           }}
         >
           {s}×
@@ -125,35 +116,8 @@ export default function PlaybackControls() {
             setPlaying(false)
             setCurrentFrame(Number(e.target.value))
           }}
-          style={{ position: 'absolute', width: '100%', margin: 0, accentColor: '#4a90d9' }}
+          style={{ position: 'absolute', width: '100%', margin: 0, accentColor: 'var(--accent)' }}
         />
-        {/* Visual overlay — pointer-events: none so clicks go to the range input */}
-        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-          {gapFrames.map(g => (
-            <div
-              key={g.frameIndex}
-              title={`Gap: ${g.clockJump.toFixed(1)}s dead ball`}
-              style={{
-                position: 'absolute',
-                left: `${maxFrame > 0 ? g.frameIndex / maxFrame * 100 : 0}%`,
-                top: 0, bottom: 0, width: 2,
-                background: '#e05c5c', opacity: 0.75,
-              }}
-            />
-          ))}
-          {syncPoints.map(sp => (
-            <div
-              key={sp.id}
-              title={`Sync: f${sp.frame} → ${sp.videoTime.toFixed(2)}s`}
-              style={{
-                position: 'absolute',
-                left: `${maxFrame > 0 ? sp.frame / maxFrame * 100 : 0}%`,
-                top: 3, bottom: 3, width: 2,
-                background: '#5cb85c', opacity: 0.9,
-              }}
-            />
-          ))}
-        </div>
       </div>
 
       {/* Clock display */}
@@ -161,19 +125,10 @@ export default function PlaybackControls() {
         Q{quarter} {formatClock(quarterClock)}
       </span>
       {shotClock !== null && (
-        <span style={{ fontSize: 13, color: shotClock <= 5 ? '#e05c5c' : 'var(--text-3)', minWidth: 60 }}>
+        <span style={{ fontSize: 13, color: shotClock <= 5 ? 'var(--accent-danger)' : 'var(--text-3)', minWidth: 60 }}>
           Shot: {shotClock.toFixed(1)}
         </span>
       )}
     </div>
   )
-}
-
-function modeBtn(active: boolean): React.CSSProperties {
-  return {
-    background: active ? '#2a5a2a' : '#2a3a5a',
-    color: 'white', border: 'none',
-    height: 28, padding: '0 10px', borderRadius: 4, cursor: 'pointer',
-    fontSize: 12, flexShrink: 0, whiteSpace: 'nowrap' as const,
-  }
 }
