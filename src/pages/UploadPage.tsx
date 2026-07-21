@@ -4,6 +4,9 @@ import { useStore } from '../store/useStore'
 const PDATA_KEY      = 'pdata_csv'
 const PDATA_NAME_KEY = 'pdata_name'
 
+// Video Quarter Splitter entry — hidden for now (feature not needed)
+const SHOW_VIDEO_SPLITTER = false
+
 function readFile(file: File): Promise<string> {
   return new Promise((res, rej) => {
     const r = new FileReader()
@@ -130,20 +133,24 @@ export default function UploadPage({ onPossession:_onPossession, onQuarter, onSp
           </div>
         )}
 
-        {/* Divider */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-          <span style={{ fontSize: 11, color: 'var(--text-4)' }}>tools</span>
-          <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-        </div>
+        {/* Video Quarter Splitter — hidden for now, flip to true to restore */}
+        {SHOW_VIDEO_SPLITTER && (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+              <span style={{ fontSize: 11, color: 'var(--text-4)' }}>tools</span>
+              <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+            </div>
 
-        <ModeButton
-          icon="✂"
-          label="Video Quarter Splitter"
-          description="Split a full-game video into individual quarter clips"
-          enabled={true}
-          onClick={onSplit}
-        />
+            <ModeButton
+              icon="✂"
+              label="Video Quarter Splitter"
+              description="Split a full-game video into individual quarter clips"
+              enabled={true}
+              onClick={onSplit}
+            />
+          </>
+        )}
 
         {/* Divider */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
