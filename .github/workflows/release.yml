@@ -1,4 +1,4 @@
-name: Build & Release Windows App
+name: Build & Release App
 
 on:
   push:
@@ -9,7 +9,17 @@ permissions:
   contents: write
 
 jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: false
+
   build-windows:
+    needs: create-release
     runs-on: windows-latest
 
     steps:
@@ -33,11 +43,9 @@ jobs:
       - name: Package Windows app
         run: npx electron-builder --win --publish never '-c.nsis.artifactName=guardingwhoop-Setup-${version}.${ext}' '-c.portable.artifactName=guardingwhoop-Portable-${version}.${ext}'
 
-      - name: Create Release & upload exe
+      - name: Upload exe to release
         uses: softprops/action-gh-release@v2
         with:
-          draft: false
-          prerelease: false
           files: |
             dist_electron/*.exe
             dist_electron/*.blockmap
@@ -47,3 +55,39 @@ jobs:
         with:
           name: windows-installer
           path: dist_electron/*.exe
+
+  build-mac:
+    needs: create-release
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Sync package version with tag
+        run: npm version --no-git-tag-version "${GITHUB_REF_NAME#v}"
+
+      - name: Build frontend (production)
+        run: npm run build:prod
+
+      - name: Package macOS app
+        run: npx electron-builder --mac --publish never -c.mac.target=dmg '-c.mac.artifactName=guardingwhoop-${version}-arm64.${ext}'
+
+      - name: Upload dmg to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist_electron/*.dmg
+
+      - name: Upload dmg as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-installer
+          path: dist_electron/*.dmg
