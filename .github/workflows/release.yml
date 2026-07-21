@@ -24,19 +24,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Sync package version with tag
+        run: npm version --no-git-tag-version ($env:GITHUB_REF_NAME -replace '^v','')
+
       - name: Build frontend (production)
         run: npm run build:prod
 
-      - name: Create Release
+      - name: Package Windows app
+        run: npx electron-builder --win --publish never '-c.nsis.artifactName=guardingwhoop-Setup-${version}.${ext}' '-c.portable.artifactName=guardingwhoop-Portable-${version}.${ext}'
+
+      - name: Create Release & upload exe
         uses: softprops/action-gh-release@v2
         with:
           draft: false
           prerelease: false
-
-      - name: Package Windows app & publish
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx electron-builder --win --publish always
+          files: |
+            dist_electron/*.exe
+            dist_electron/*.blockmap
 
       - name: Upload exe as artifact
         uses: actions/upload-artifact@v4
