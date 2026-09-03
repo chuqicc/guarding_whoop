@@ -22,6 +22,17 @@ function resolveAttacker(id: AttackerId, playerDict: Record<number, Player>) {
   return id === 'GUARD_NONE' ? null : playerDict[id as number]
 }
 
+// RFC4180 quoting. Player names legitimately contain commas ("Smith, Jr."),
+// which silently corrupted every downstream parse of the frame CSV.
+function csvEscape(value: unknown): string {
+  const str = value === null || value === undefined ? '' : String(value)
+  return /[",\n\r]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str
+}
+
+function csvRow(cells: unknown[]): string {
+  return cells.map(csvEscape).join(',')
+}
+
 function getFrameBucket(frame: TrackingFrame): number {
   return Math.floor(frame.quarterClock / QUARTER_BUCKET_S) * QUARTER_BUCKET_S
 }
@@ -59,7 +70,9 @@ export function buildAnnotationExport(input: ExportInput) {
     frameStart: number; frameEnd: number
     qcMax: number; scMax: number | null
     momentStart?: number; momentEnd?: number
-    firstFramePlayers: TrackingFrame['players']
+    // Union across every frame in the bucket, not just the first — a player
+    // subbed in mid-bucket must not lose their annotation.
+    onCourt: Set<number>
   }
   const groups = new Map<number, Grp>()
   for (const f of frames) {
@@ -72,10 +85,11 @@ export function buildAnnotationExport(input: ExportInput) {
         qcMax: f.quarterClock,
         scMax: f.shotClock !== null && !isNaN(f.shotClock) ? f.shotClock : null,
         momentStart: f.momentId, momentEnd: f.momentId,
-        firstFramePlayers: f.players,
+        onCourt: new Set(f.players.map(p => p.id)),
       })
     } else {
-      if (f.frameIndex < g.frameStart) { g.frameStart = f.frameIndex; g.firstFramePlayers = f.players; g.momentStart = f.momentId ?? g.momentStart }
+      for (const p of f.players) g.onCourt.add(p.id)
+      if (f.frameIndex < g.frameStart) { g.frameStart = f.frameIndex; g.momentStart = f.momentId ?? g.momentStart }
       if (f.frameIndex > g.frameEnd)   { g.frameEnd = f.frameIndex; g.momentEnd = f.momentId ?? g.momentEnd }
       if (f.quarterClock > g.qcMax) g.qcMax = f.quarterClock
       if (f.shotClock !== null && !isNaN(f.shotClock) && (g.scMax === null || f.shotClock > g.scMax)) g.scMax = f.shotClock
@@ -102,30 +116,65 @@ export function buildAnnotationExport(input: ExportInput) {
       if (reboundBuckets.includes(bucket)) events.push('rebound')
       if (events.length > 0) row.events = events
 
-      if (!isDead) {
-        const bDefTeamId = getBucketDefendingTeamId(bucket, annotations, playerDict, meta.defendingTeamId)
-        const bDefTeam   = bDefTeamId === meta.teamA.teamId ? meta.teamA : meta.teamB
-        const bAttTeam   = bDefTeamId === meta.teamA.teamId ? meta.teamB : meta.teamA
-        row.def_team = bDefTeam.abbr
-        row.att_team = bAttTeam.abbr
+      const bDefTeamId = getBucketDefendingTeamId(bucket, annotations, playerDict, meta.defendingTeamId)
+      const bDefTeam   = bDefTeamId === meta.teamA.teamId ? meta.teamA : meta.teamB
+      const bAttTeam   = bDefTeamId === meta.teamA.teamId ? meta.teamB : meta.teamA
+      row.def_team = bDefTeam.abbr
+      row.att_team = bAttTeam.abbr
 
-        const onCourtIds = new Set(g.firstFramePlayers.map(p => p.id))
-        row.assignments = bDefTeam.players
-          .filter(p => onCourtIds.has(p.id))
-          .map(defender => {
-            const ann = annotations.find(c => c.defenderId === defender.id && c.shotClockBucket === bucket)
-            const entry: NonNullable<ExportBucketRow['assignments']>[number] = {
-              def: defender.id,
-              att: ann ? (ann.attackerId === 'GUARD_NONE' ? 'NONE' : ann.attackerId) : null,
-            }
-            if (ann && (ann.confidence === 1 || ann.confidence === 2)) entry.conf = ann.confidence
-            return entry
-          })
+      // Every defender we must report on: the defending team's on-court
+      // players, plus anyone actually annotated in this bucket. The latter
+      // covers the "historical" rows the UI keeps for the other team after a
+      // defense swap, which were previously stored but never exported.
+      const annotatedHere = annotations.filter(c => c.shotClockBucket === bucket)
+      const defenderIds: number[] = []
+      const seen = new Set<number>()
+      for (const p of bDefTeam.players) {
+        if (g.onCourt.has(p.id) && !seen.has(p.id)) { seen.add(p.id); defenderIds.push(p.id) }
       }
+      for (const c of annotatedHere) {
+        if (!seen.has(c.defenderId)) { seen.add(c.defenderId); defenderIds.push(c.defenderId) }
+      }
+
+      // Dead buckets keep status:'dead' but still report what was recorded.
+      // Silently deleting an annotator's work at export time is never correct.
+      row.assignments = defenderIds.map(defId => {
+        const ann = annotatedHere.find(c => c.defenderId === defId)
+        const entry: NonNullable<ExportBucketRow['assignments']>[number] = {
+          def: defId,
+          att: ann ? (ann.attackerId === 'GUARD_NONE' ? 'NONE' : ann.attackerId) : null,
+        }
+        if (ann && (ann.confidence === 1 || ann.confidence === 2)) entry.conf = ann.confidence
+        return entry
+      })
       return row
     })
 
   // Players referenced anywhere (both rosters) — names/jerseys stored once
+  // Integrity gate. Every annotation the store holds must appear in the export.
+  // Three separate bugs used to drop cells here silently; a wrong number in a
+  // published result is far worse than a failed export, so refuse instead.
+  {
+    const exported = new Set<string>()
+    for (const row of bucketRows) {
+      for (const a of row.assignments ?? []) {
+        if (a.att !== null) exported.add(`${a.def}_${row.bucket}`)
+      }
+    }
+    const missing = annotations
+      .map(c => `${c.defenderId}_${c.shotClockBucket}`)
+      .filter(k => !exported.has(k))
+    if (missing.length > 0) {
+      const unique = [...new Set(missing)]
+      throw new Error(
+        `Export aborted: ${unique.length} recorded assignment(s) would be lost ` +
+        `(defenderId_bucket): ${unique.slice(0, 10).join(', ')}` +
+        `${unique.length > 10 ? ', …' : ''}. ` +
+        `This usually means an annotation exists for a bucket with no tracking frames.`
+      )
+    }
+  }
+
   const players: Record<string, { name: string; jersey: string; team: string }> = {}
   for (const team of [meta.teamA, meta.teamB]) {
     for (const p of team.players) {
@@ -199,41 +248,49 @@ export function buildFrameCSV(input: ExportInput): string {
       annotatorName,
     ]
 
-    if (isDead) {
-      // 5 blank rows per dead frame — maintain structure, no assignment info during dead ball
-      for (let i = 0; i < 5; i++) {
-        rows.push([...base, '', '', '', '', '', '', '', '', '', ...tail].join(','))
-      }
-    } else {
-      const bDefTeamId = getBucketDefendingTeamId(bucket, annotations, playerDict, meta.defendingTeamId)
-      const bDefTeam   = bDefTeamId === meta.teamA.teamId ? meta.teamA : meta.teamB
-      const bAttTeam   = bDefTeamId === meta.teamA.teamId ? meta.teamB : meta.teamA
+    const bDefTeamId = getBucketDefendingTeamId(bucket, annotations, playerDict, meta.defendingTeamId)
+    const bDefTeam   = bDefTeamId === meta.teamA.teamId ? meta.teamA : meta.teamB
+    const bAttTeam   = bDefTeamId === meta.teamA.teamId ? meta.teamB : meta.teamA
 
-      const onCourtIds = new Set(frame.players.map(p => p.id))
-      const defPlayers = bDefTeam.players.filter(p => onCourtIds.has(p.id))
+    const onCourtIds  = new Set(frame.players.map(p => p.id))
+    const annotatedHere = annotations.filter(c => c.shotClockBucket === bucket)
 
-      for (const defender of defPlayers) {
-        const ann      = annotations.find(c => c.defenderId === defender.id && c.shotClockBucket === bucket)
-        const attacker = ann ? resolveAttacker(ann.attackerId, playerDict) : null
-        const isNone   = ann?.attackerId === 'GUARD_NONE'
-        const attJersey = isNone ? 'GUARD_NONE' : (attacker?.jersey ?? '')
-        const attId    = isNone ? 'GUARD_NONE' : (ann ? String(ann.attackerId) : '')
-        const attName  = isNone ? 'GUARD_NONE' : (attacker?.name ?? '')
+    const defenderIds: number[] = []
+    const seenDef = new Set<number>()
+    for (const p of bDefTeam.players) {
+      if (onCourtIds.has(p.id) && !seenDef.has(p.id)) { seenDef.add(p.id); defenderIds.push(p.id) }
+    }
+    for (const c of annotatedHere) {
+      if (!seenDef.has(c.defenderId)) { seenDef.add(c.defenderId); defenderIds.push(c.defenderId) }
+    }
 
-        rows.push([
-          ...base,
-          bDefTeam.abbr,
-          bAttTeam.abbr,
-          defender.jersey,
-          defender.id,
-          defender.name,
-          attJersey,
-          attId,
-          attName,
-          ann?.confidence ?? 3,
-          ...tail,
-        ].join(','))
-      }
+    if (defenderIds.length === 0) {
+      rows.push(csvRow([...base, '', '', '', '', '', '', '', '', '', ...tail]))
+      continue
+    }
+
+    for (const defId of defenderIds) {
+      const defender = playerDict[defId]
+      const ann      = annotatedHere.find(c => c.defenderId === defId)
+      const attacker = ann ? resolveAttacker(ann.attackerId, playerDict) : null
+      const isNone   = ann?.attackerId === 'GUARD_NONE'
+      const attJersey = isNone ? 'GUARD_NONE' : (attacker?.jersey ?? '')
+      const attId    = isNone ? 'GUARD_NONE' : (ann ? String(ann.attackerId) : '')
+      const attName  = isNone ? 'GUARD_NONE' : (attacker?.name ?? '')
+
+      rows.push(csvRow([
+        ...base,
+        bDefTeam.abbr,
+        bAttTeam.abbr,
+        defender?.jersey ?? '',
+        defId,
+        defender?.name ?? '',
+        attJersey,
+        attId,
+        attName,
+        ann?.confidence ?? 3,
+        ...tail,
+      ]))
     }
   }
 
@@ -255,15 +312,15 @@ export function exportNotesCSV(
 
   const rows = notes.map(n => {
     const defender = n.defenderId !== undefined ? playerDict[n.defenderId] : null
-    return [
+    return csvRow([
       meta.gameId,
       meta.quarter,
       n.bucket,
       defender?.jersey ?? '',
       defender?.name ?? '',
-      `"${n.text.replace(/"/g, '""')}"`,
+      n.text,
       n.createdAt,
-    ].join(',')
+    ])
   })
 
   download([headers.join(','), ...rows].join('\n'), `${meta.filename}_notes.csv`, 'text/csv')

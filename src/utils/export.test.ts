@@ -79,11 +79,14 @@ describe('buildAnnotationExport (JSON v2)', () => {
     expect(first.moment_end).toBe(1040)
   })
 
-  it('feature 1: dead bucket exports no assignments even though one was recorded', () => {
+  it('feature 1: a dead bucket is marked dead but keeps what was recorded', () => {
+    // Previously this dropped `assignments` entirely. Marking a bucket dead is
+    // a statement about the game clock, not permission to delete an
+    // annotator's work — downstream analysis filters on `status` instead.
     const dead = out.buckets[1]
     expect(dead.status).toBe('dead')
-    expect(dead.assignments).toBeUndefined()
-    expect(dead.def_team).toBeUndefined()
+    expect(dead.def_team).toBe('AAA')
+    expect(dead.assignments?.find(a => a.def === 1)?.att).toBe(7)
   })
 
   it('feature 4: shot/rebound events land on the right buckets', () => {
@@ -118,9 +121,10 @@ describe('parseAnnotationJSON round-trip (v2)', () => {
     expect(imported.reboundBuckets?.sort()).toEqual([399.0, 399.5])
 
     const byKey = new Map(imported.annotations.map(a => [`${a.defenderId}_${a.shotClockBucket}`, a]))
-    expect(byKey.size).toBe(3)  // a3 (dead bucket) is gone by design
+    expect(byKey.size).toBe(4)  // all four survive, including the dead-bucket one
     expect(byKey.get('1_400')).toMatchObject({ attackerId: 6, confidence: 2 })
     expect(byKey.get('2_400')).toMatchObject({ attackerId: 'GUARD_NONE' })
+    expect(byKey.get('1_399.5')).toMatchObject({ attackerId: 7 })
     expect(byKey.get('1_399')).toMatchObject({ attackerId: 7 })
   })
 
@@ -181,13 +185,118 @@ describe('buildFrameCSV', () => {
     }
   })
 
-  it('feature 1: dead frames export blank assignment fields', () => {
+  it('feature 1: dead frames are flagged dead but still carry their defenders', () => {
     const iStatus = headers.indexOf('gamestatus')
     const iDefId  = headers.indexOf('defender_id')
     const deadRows = lines.slice(1).filter(l => l.split(',')[iStatus] === 'dead')
-    expect(deadRows.length).toBe(2 * 5)  // 2 dead frames × 5 placeholder rows
+    // 2 dead frames × 2 on-court defenders on the defending team
+    expect(deadRows.length).toBe(2 * 2)
     for (const row of deadRows) {
-      expect(row.split(',')[iDefId]).toBe('')
+      expect(row.split(',')[iDefId]).not.toBe('')
     }
   })
 })
+
+// ── Regressions for the three export data-loss paths ────────────────────────
+//
+// Each of these silently dropped annotations that the UI had accepted, stored
+// in localStorage, and displayed back to the annotator. They are correctness
+// bugs in a research artifact, not cosmetic ones.
+
+describe('export preserves every recorded annotation', () => {
+  it('keeps assignments for the team that was NOT derived as defending', () => {
+    // AnnotationArea renders "historical" rows for the other team after a
+    // defense swap, and those cells persist. They must reach the export.
+    const mixed: CellAnnotation[] = [
+      { id: 'x1', defenderId: 1, attackerId: 6, shotClockBucket: 400.0 },  // team A defends
+      { id: 'x2', defenderId: 6, attackerId: 1, shotClockBucket: 400.0 },  // team B defender, same bucket
+    ]
+    const out = buildAnnotationExport({ ...input, annotations: mixed, deadTimeBuckets: [] })
+    const first = out.buckets[0]
+    const defs = (first.assignments ?? []).map(a => a.def)
+    expect(defs).toContain(1)
+    expect(defs).toContain(6)
+  })
+
+  it('keeps a defender who is only on court later in the bucket (substitution)', () => {
+    // onCourtIds was built from the bucket's FIRST frame only, so a player
+    // subbed in mid-bucket lost their annotation.
+    const sub = { id: 9, name: 'Sub', jersey: '99', teamId: TEAM_A, teamAbbr: 'AAA' }
+    const dictWithSub = { ...playerDict, 9: sub }
+    const metaWithSub = {
+      ...meta,
+      teamA: { ...meta.teamA, players: [...playersA, sub] },
+    }
+    // frame 0 without the sub, frame 1 with them
+    const subFrames: TrackingFrame[] = [
+      { frameIndex: 0, momentId: 1000, quarterClock: 400.2, shotClock: 24.8,
+        ballX: 0, ballY: 0, ballZ: 0, players: onCourt },
+      { frameIndex: 1, momentId: 1040, quarterClock: 400.0, shotClock: 24.1,
+        ballX: 0, ballY: 0, ballZ: 0, players: [...onCourt, { id: 9, teamId: TEAM_A, x: 0, y: 0 }] },
+    ]
+    const out = buildAnnotationExport({
+      ...input,
+      meta: metaWithSub,
+      playerDict: dictWithSub,
+      frames: subFrames,
+      annotations: [{ id: 's1', defenderId: 9, attackerId: 6, shotClockBucket: 400.0 }],
+      deadTimeBuckets: [], shotBuckets: [], reboundBuckets: [],
+    })
+    const defs = (out.buckets[0].assignments ?? []).map(a => a.def)
+    expect(defs).toContain(9)
+  })
+
+  it('still reports assignments recorded in a bucket later marked dead', () => {
+    // Marking a bucket dead after annotating it silently deleted that work on
+    // export. The bucket stays status:'dead'; the data must survive.
+    const out = buildAnnotationExport(input)
+    const dead = out.buckets[1]
+    expect(dead.status).toBe('dead')
+    const entry = (dead.assignments ?? []).find(a => a.def === 1)
+    expect(entry?.att).toBe(7)
+  })
+
+  it('exports exactly as many annotated cells as were recorded', () => {
+    const out = buildAnnotationExport(input)
+    const exported = out.buckets.flatMap(b => b.assignments ?? []).filter(a => a.att !== null)
+    expect(exported).toHaveLength(annotations.length)
+  })
+})
+
+describe('CSV escaping', () => {
+  it('does not corrupt a row when a player name contains a comma', () => {
+    const commaDict: Record<number, Player> = {
+      ...playerDict,
+      1: { ...playerDict[1], name: 'Smith, Jr.' },
+    }
+    const commaMeta = {
+      ...meta,
+      teamA: { ...meta.teamA, players: [{ ...playersA[0], name: 'Smith, Jr.' }, playersA[1]] },
+    }
+    const csv = buildFrameCSV({ ...input, playerDict: commaDict, meta: commaMeta })
+    const lines = csv.split('\n')
+    const headerCount = lines[0].split(',').length
+    for (const line of lines.slice(1)) {
+      expect(splitCSVLine(line)).toHaveLength(headerCount)
+    }
+    expect(csv).toContain('"Smith, Jr."')
+  })
+})
+
+// Minimal RFC4180-ish splitter, used only to assert the export is parseable.
+function splitCSVLine(line: string): string[] {
+  const out: string[] = []
+  let cur = '', inQ = false
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]
+    if (inQ) {
+      if (c === '"' && line[i + 1] === '"') { cur += '"'; i++ }
+      else if (c === '"') inQ = false
+      else cur += c
+    } else if (c === '"') inQ = true
+    else if (c === ',') { out.push(cur); cur = '' }
+    else cur += c
+  }
+  out.push(cur)
+  return out
+}

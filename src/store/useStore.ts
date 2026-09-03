@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { v4 as uuid } from 'uuid'
 import { parsePlayerDict } from '../utils/parseCSV'
 import { parseQuarterJSON } from '../utils/parseQuarterJSON'
+import { safeSet, parseOrQuarantine, isNumberArray } from './safeStorage'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -136,34 +137,23 @@ function fileKey(prefix: string, quarterMeta: QuarterMeta | null): string | null
 // no code path that can mutate state and forget to write it back.
 function persist(prefix: string, quarterMeta: QuarterMeta | null, value: unknown): void {
   const key = fileKey(prefix, quarterMeta)
-  if (key) localStorage.setItem(key, JSON.stringify(value))
+  if (key) safeSet(key, JSON.stringify(value))
 }
 
 function loadNotes(key: string | null): AnnotationNote[] {
   if (!key) return []
-  try {
-    const raw = localStorage.getItem(key)
-    if (!raw) return []
-    const parsed = JSON.parse(raw)
-    if (Array.isArray(parsed)) return parsed as AnnotationNote[]
-  } catch { /* ignore */ }
-  return []
+  return parseOrQuarantine(key, (v): v is AnnotationNote[] => Array.isArray(v)) ?? []
 }
 
 function loadNumberArray(key: string | null): number[] {
   if (!key) return []
-  try {
-    const raw = localStorage.getItem(key)
-    if (!raw) return []
-    const parsed = JSON.parse(raw)
-    if (Array.isArray(parsed)) return parsed.filter(n => typeof n === 'number')
-  } catch { /* ignore */ }
-  return []
+  return parseOrQuarantine(key, isNumberArray) ?? []
 }
 
 function loadNumber(key: string | null): number {
   if (!key) return 0
-  const raw = localStorage.getItem(key)
+  let raw: string | null
+  try { raw = localStorage.getItem(key) } catch { return 0 }
   const n = raw ? parseFloat(raw) : 0
   return isNaN(n) ? 0 : n
 }
@@ -201,18 +191,15 @@ export const useStore = create<AppStore>((set, get) => ({
   loadQuarter: (jsonText, filename) => {
     const { frames, quarterMeta, playerDict } = parseQuarterJSON(jsonText, filename)
     const key = `annotation_quarter_${quarterMeta.filename}`
-    let pendingRestore: CellAnnotation[] | null = null
-    const saved = localStorage.getItem(key)
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved) as CellAnnotation[]
-        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].shotClockBucket !== undefined) {
-          pendingRestore = parsed
-        }
-      } catch { /* ignore */ }
-    }
-    const deadSaved = localStorage.getItem(`deadtime_quarter_${quarterMeta.filename}`)
-    const deadTimeBuckets: number[] = deadSaved ? JSON.parse(deadSaved) : []
+    const savedAnns = parseOrQuarantine(
+      key,
+      (v): v is CellAnnotation[] =>
+        Array.isArray(v) && v.every(a => a && typeof a === 'object' && 'shotClockBucket' in a),
+    )
+    const pendingRestore: CellAnnotation[] | null =
+      savedAnns && savedAnns.length > 0 ? savedAnns : null
+
+    const deadTimeBuckets = loadNumberArray(`deadtime_quarter_${quarterMeta.filename}`)
     const shotBuckets    = loadNumberArray(`shot_quarter_${quarterMeta.filename}`)
     const reboundBuckets = loadNumberArray(`rebound_quarter_${quarterMeta.filename}`)
     const memoryBarrierFrames = loadNumberArray(`membarrier_quarter_${quarterMeta.filename}`)
@@ -317,7 +304,7 @@ export const useStore = create<AppStore>((set, get) => ({
   toggleAutoFillMemory: () => {
     const next = !get().autoFillMemory
     set({ autoFillMemory: next })
-    localStorage.setItem('autoFillMemory', next ? 'on' : 'off')
+    safeSet('autoFillMemory', next ? 'on' : 'off')
   },
 
   restoreImported: ({ annotations, deadTimeBuckets, shotBuckets, reboundBuckets }) => {
@@ -360,7 +347,7 @@ export const useStore = create<AppStore>((set, get) => ({
 
   setAnnotatorName: (name) => {
     set({ annotatorName: name })
-    localStorage.setItem('annotatorName', name)
+    safeSet('annotatorName', name)
   },
 
   incrementAnnotationTime: (delta) => {

@@ -6,6 +6,7 @@ import { exportJSON, exportFrameCSV, exportNotesCSV } from '../utils/export'
 import { parseAnnotationCSV } from '../utils/importCSV'
 import { parseAnnotationJSON } from '../utils/importJSON'
 import { toggleBtnStyle } from '../utils/buttonStyle'
+import { subscribeStorageStatus, type StorageStatus } from '../store/safeStorage'
 
 function fmtDuration(totalSeconds: number): string {
   const h = Math.floor(totalSeconds / 3600)
@@ -41,6 +42,11 @@ export default function TopBar({ onNewSession }: Props) {
   const restoreImported    = useStore(s => s.restoreImported)
 
   const [error, setError]       = useState<string | null>(null)
+
+  // Surface persistence failures. Previously the indicator read "saved"
+  // unconditionally, including on the paths that never wrote anything.
+  const [storageStatus, setStorageStatus] = useState<StorageStatus>({ state: 'ok' })
+  useEffect(() => subscribeStorageStatus(setStorageStatus), [])
   const [notesOpen, setNotesOpen] = useState(false)
   const [noteText, setNoteText]   = useState('')
   const [noteDefenderId, setNoteDefenderId] = useState<string>('')
@@ -188,8 +194,31 @@ export default function TopBar({ onNewSession }: Props) {
         )}
 
         {cellAnnotations.length > 0 && (
-          <span style={{ fontSize: 11, color: 'var(--text-4)' }}>
-            {cellAnnotations.length} cell{cellAnnotations.length !== 1 ? 's' : ''} · saved
+          <span
+            role="status"
+            aria-live="polite"
+            style={{
+              fontSize: 11,
+              fontWeight: storageStatus.state === 'failed' ? 700 : 400,
+              color: storageStatus.state === 'failed' ? 'var(--accent-danger)' : 'var(--text-4)',
+            }}
+            title={storageStatus.state === 'failed' ? storageStatus.message : undefined}
+          >
+            {cellAnnotations.length} cell{cellAnnotations.length !== 1 ? 's' : ''}
+            {storageStatus.state === 'failed' ? ' · ⚠ SAVE FAILED' : ' · saved'}
+          </span>
+        )}
+
+        {storageStatus.state === 'failed' && (
+          <span
+            role="alert"
+            style={{
+              fontSize: 11, color: 'var(--accent-danger)', fontWeight: 600,
+              maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}
+            title={storageStatus.message}
+          >
+            {storageStatus.message}
           </span>
         )}
 
