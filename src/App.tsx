@@ -8,6 +8,7 @@ import CourtCanvas from './components/CourtCanvas'
 import RosterPanel from './components/RosterPanel'
 import PlaybackControls from './components/PlaybackControls'
 import AnnotationArea from './components/AnnotationArea'
+import SpellTimeline from './components/SpellTimeline'
 import { useStore } from './store/useStore'
 
 // ── Panel size constants ─────────────────────────────────────────────────────
@@ -25,6 +26,9 @@ const ROSTER_MAX_W = 500
 
 export default function App() {
   const [page, setPage] = useState<'home' | 'quarter-setup' | 'quarter'>('home')
+
+  // Cells are how the work is entered; spells are the unit the analysis reads.
+  const [bottomView, setBottomView] = useState<'grid' | 'spells'>('grid')
 
   // Transient confirmation of an undo/redo, so the annotator can see that a
   // destructive action was reversible and what exactly came back.
@@ -308,8 +312,34 @@ export default function App() {
         <span style={{ color: 'var(--divider-fg)', fontSize: 10, letterSpacing: 4 }}>⠿</span>
       </div>
 
+      {/* Bottom pane: per-bucket grid, or the spells derived from it */}
+      <div style={{
+        display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0,
+        padding: '4px 10px', background: 'var(--bg-surface)',
+        borderBottom: '1px solid var(--border)',
+      }}>
+        {(['grid', 'spells'] as const).map(v => (
+          <button
+            key={v}
+            onClick={() => setBottomView(v)}
+            aria-pressed={bottomView === v}
+            title={v === 'grid'
+              ? 'Per-bucket assignment grid'
+              : 'Marking spells — consecutive buckets on the same attacker, merged'}
+            style={{
+              background: bottomView === v ? 'var(--bg-col-active)' : 'transparent',
+              color: bottomView === v ? 'var(--text-1)' : 'var(--text-3)',
+              border: `1px solid ${bottomView === v ? 'var(--border)' : 'transparent'}`,
+              borderRadius: 4, padding: '2px 10px', fontSize: 12, cursor: 'pointer',
+            }}
+          >
+            {v === 'grid' ? '▦ Grid' : '▬ Spells'}
+          </button>
+        ))}
+      </div>
+
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-        <AnnotationArea />
+        {bottomView === 'grid' ? <AnnotationArea /> : <SpellTimeline />}
       </div>
     </div>
   )
