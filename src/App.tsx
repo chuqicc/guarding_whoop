@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { isEditableTarget } from './utils/isEditableTarget'
 import UploadPage from './pages/UploadPage'
 import QuarterSetupPage from './pages/QuarterSetupPage'
 import TopBar from './components/TopBar'
@@ -24,6 +25,15 @@ const ROSTER_MAX_W = 500
 
 export default function App() {
   const [page, setPage] = useState<'home' | 'quarter-setup' | 'quarter'>('home')
+
+  // Transient confirmation of an undo/redo, so the annotator can see that a
+  // destructive action was reversible and what exactly came back.
+  const [toast, setToast] = useState<string | null>(null)
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 2200)
+    return () => clearTimeout(t)
+  }, [toast])
   const [videoPx,  setVideoPx]  = useState(VIDEO_DEFAULT_W)
   const [topPx,    setTopPx]    = useState(TOP_DEFAULT_H)
   const [rosterPx, setRosterPx] = useState(ROSTER_DEFAULT_W)
@@ -83,7 +93,18 @@ export default function App() {
   // ── Global keyboard shortcuts ─────────────────────────────────────────────
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement) return
+      // Covers textarea and contenteditable too — the old HTMLInputElement-only
+      // check meant Space in the notes textarea toggled playback and was eaten.
+      if (isEditableTarget(e.target)) return
+
+      const mod = e.metaKey || e.ctrlKey
+      if (mod && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        const label = e.shiftKey ? useStore.getState().redo() : useStore.getState().undo()
+        setToast(label ? `${e.shiftKey ? 'Redo' : 'Undo'}: ${label}` : 'Nothing to undo')
+        return
+      }
+
       if (e.code === 'Space') {
         e.preventDefault()
         const { isPlaying, setPlaying } = useStore.getState()
@@ -181,6 +202,23 @@ export default function App() {
       display: 'flex', flexDirection: 'column', height: '100vh',
       overflow: 'hidden', background: 'var(--bg-page)',
     }}>
+      {/* Undo/redo confirmation */}
+      {toast && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)',
+            background: 'var(--bg-panel)', color: 'var(--text-1)',
+            border: '1px solid var(--border)', borderRadius: 6,
+            padding: '8px 16px', fontSize: 13, zIndex: 1000,
+            boxShadow: '0 4px 16px rgba(0,0,0,0.4)', pointerEvents: 'none',
+          }}
+        >
+          {toast}
+        </div>
+      )}
+
       {/* Restore banner */}
       {pendingRestore && (
         <div style={{

@@ -3,6 +3,7 @@ import { v4 as uuid } from 'uuid'
 import { parsePlayerDict } from '../utils/parseCSV'
 import { parseQuarterJSON } from '../utils/parseQuarterJSON'
 import { safeSet, parseOrQuarantine, isNumberArray } from './safeStorage'
+import { pushTxn, resetHistory, undo as undoHistory, redo as redoHistory, type UndoPatch } from './undo'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -115,6 +116,14 @@ interface AppStore {
   setCellConfidence: (defenderId: number, bucket: number, confidence: 1 | 2 | 3) => void
   removeCellAnnotation: (id: string) => void
   setCellAnnotations: (anns: CellAnnotation[]) => void  // for import / restore
+  /** Write several cells as ONE undo step. `implicit` marks machine-generated carry-forward. */
+  setCellAnnotationsBatch: (
+    entries: Array<{ defenderId: number; attackerId: AttackerId; bucket: number; confidence?: 1 | 2 | 3 }>,
+    implicit?: boolean,
+  ) => void
+  /** Returns the label of what was undone/redone, or null when there was nothing. */
+  undo: () => string | null
+  redo: () => string | null
   clearBucketAnnotations: (bucket: number) => void
   dismissRestore: () => void
   setVideoUrl: (url: string | null) => void
@@ -156,6 +165,56 @@ function loadNumber(key: string | null): number {
   try { raw = localStorage.getItem(key) } catch { return 0 }
   const n = raw ? parseFloat(raw) : 0
   return isNaN(n) ? 0 : n
+}
+
+// ── Transactions ───────────────────────────────────────────────────────────
+// Every annotation mutation goes through applyTxn, so there is exactly one
+// place that writes state, records undo history, and persists. There is no
+// longer a code path that can mutate and forget to save (setCellAnnotations
+// used to be exactly that, and it was the CSV-import handler).
+
+const TRACKED = {
+  cellAnnotations: 'annotation',
+  deadTimeBuckets: 'deadtime',
+  shotBuckets:     'shot',
+  reboundBuckets:  'rebound',
+} as const
+
+type TrackedKey = keyof typeof TRACKED
+
+type SetFn = (partial: Partial<AppStore> | ((s: AppStore) => Partial<AppStore>)) => void
+type GetFn = () => AppStore
+
+function pick(state: AppStore, keys: readonly TrackedKey[]): UndoPatch {
+  const out: UndoPatch = {}
+  for (const k of keys) (out as Record<string, unknown>)[k] = state[k]
+  return out
+}
+
+function persistKeys(state: AppStore, keys: readonly TrackedKey[]): void {
+  for (const k of keys) persist(TRACKED[k], state.quarterMeta, state[k])
+}
+
+function applyTxn(
+  set: SetFn,
+  get: GetFn,
+  label: string,
+  keys: readonly TrackedKey[],
+  producer: (s: AppStore) => Partial<AppStore>,
+  implicit = false,
+): void {
+  const before = pick(get(), keys)
+  set(producer)
+  const after = pick(get(), keys)
+  pushTxn({ label, before, after, ts: Date.now(), implicit })
+  persistKeys(get(), keys)
+}
+
+/** Apply an undo/redo patch: write state, then persist only what changed. */
+function applyPatch(set: SetFn, get: GetFn, patch: UndoPatch): void {
+  set(patch as Partial<AppStore>)
+  const keys = Object.keys(patch).filter((k): k is TrackedKey => k in TRACKED)
+  persistKeys(get(), keys)
 }
 
 // ── Store ──────────────────────────────────────────────────────────────────
@@ -205,6 +264,7 @@ export const useStore = create<AppStore>((set, get) => ({
     const memoryBarrierFrames = loadNumberArray(`membarrier_quarter_${quarterMeta.filename}`)
     const notes = loadNotes(`notes_quarter_${quarterMeta.filename}`)
     const annotationSeconds = loadNumber(`anntime_quarter_${quarterMeta.filename}`)
+    resetHistory()
     set({ frames, quarterMeta, playerDict, currentFrame: 0, isPlaying: false, cellAnnotations: [], deadTimeBuckets, shotBuckets, reboundBuckets, memoryBarrierFrames, pendingRestore, notes, annotationSeconds })
   },
 
@@ -231,7 +291,8 @@ export const useStore = create<AppStore>((set, get) => ({
   setCellAnnotation: (defenderId, attackerId, bucket, confidence) => {
     // Dead-time buckets never accept assignments (hard rule, feature #1)
     if (get().deadTimeBuckets.includes(bucket)) return
-    set(s => {
+    const label = `assign #${defenderId} @ ${bucket}`
+    applyTxn(set, get, label, ['cellAnnotations'], s => {
       const existing = s.cellAnnotations.find(
         c => c.defenderId === defenderId && c.shotClockBucket === bucket
       )
@@ -243,62 +304,59 @@ export const useStore = create<AppStore>((set, get) => ({
         confidence: confidence ?? existing?.confidence,
       }
       return { cellAnnotations: [...filtered, newAnn] }
-    })
-    persist('annotation', get().quarterMeta, get().cellAnnotations)
+    }, confidence === undefined ? undefined : false)
   },
 
   setCellConfidence: (defenderId, bucket, confidence) => {
-    set(s => ({
+    applyTxn(set, get, 'set confidence', ['cellAnnotations'], s => ({
       cellAnnotations: s.cellAnnotations.map(c =>
         c.defenderId === defenderId && c.shotClockBucket === bucket
           ? { ...c, confidence }
           : c
       ),
     }))
-    persist('annotation', get().quarterMeta, get().cellAnnotations)
   },
 
   removeCellAnnotation: (id) => {
-    set(s => ({ cellAnnotations: s.cellAnnotations.filter(c => c.id !== id) }))
-    persist('annotation', get().quarterMeta, get().cellAnnotations)
+    applyTxn(set, get, 'clear cell', ['cellAnnotations'], s => ({
+      cellAnnotations: s.cellAnnotations.filter(c => c.id !== id),
+    }))
   },
 
   setCellAnnotations: (anns) => {
-    set({ cellAnnotations: anns })
-    persist('annotation', get().quarterMeta, get().cellAnnotations)
+    applyTxn(set, get, 'import annotations', ['cellAnnotations'], () => ({
+      cellAnnotations: anns,
+    }))
   },
 
   clearBucketAnnotations: (bucket) => {
-    set(s => ({ cellAnnotations: s.cellAnnotations.filter(c => c.shotClockBucket !== bucket) }))
-    persist('annotation', get().quarterMeta, get().cellAnnotations)
+    applyTxn(set, get, `clear bucket ${bucket}`, ['cellAnnotations'], s => ({
+      cellAnnotations: s.cellAnnotations.filter(c => c.shotClockBucket !== bucket),
+    }))
   },
 
   toggleDeadTimeBucket: (bucket) => {
-    set(s => {
-      const next = s.deadTimeBuckets.includes(bucket)
+    applyTxn(set, get, `toggle dead ${bucket}`, ['deadTimeBuckets'], s => ({
+      deadTimeBuckets: s.deadTimeBuckets.includes(bucket)
         ? s.deadTimeBuckets.filter(b => b !== bucket)
-        : [...s.deadTimeBuckets, bucket]
-      return { deadTimeBuckets: next }
-    })
-    persist('deadtime', get().quarterMeta, get().deadTimeBuckets)
+        : [...s.deadTimeBuckets, bucket],
+    }))
   },
 
   toggleShotBucket: (bucket) => {
-    set(s => ({
+    applyTxn(set, get, `toggle shot ${bucket}`, ['shotBuckets'], s => ({
       shotBuckets: s.shotBuckets.includes(bucket)
         ? s.shotBuckets.filter(b => b !== bucket)
         : [...s.shotBuckets, bucket],
     }))
-    persist('shot', get().quarterMeta, get().shotBuckets)
   },
 
   toggleReboundBucket: (bucket) => {
-    set(s => ({
+    applyTxn(set, get, `toggle rebound ${bucket}`, ['reboundBuckets'], s => ({
       reboundBuckets: s.reboundBuckets.includes(bucket)
         ? s.reboundBuckets.filter(b => b !== bucket)
         : [...s.reboundBuckets, bucket],
     }))
-    persist('rebound', get().quarterMeta, get().reboundBuckets)
   },
 
   toggleAutoFillMemory: () => {
@@ -307,18 +365,51 @@ export const useStore = create<AppStore>((set, get) => ({
     safeSet('autoFillMemory', next ? 'on' : 'off')
   },
 
+  setCellAnnotationsBatch: (entries, implicit) => {
+    if (entries.length === 0) return
+    const dead = new Set(get().deadTimeBuckets)
+    const usable = entries.filter(e => !dead.has(e.bucket))
+    if (usable.length === 0) return
+    applyTxn(set, get, `auto-fill ${usable.length} cell(s)`, ['cellAnnotations'], s => {
+      const next = [...s.cellAnnotations]
+      for (const e of usable) {
+        const i = next.findIndex(c => c.defenderId === e.defenderId && c.shotClockBucket === e.bucket)
+        const ann: CellAnnotation = {
+          id: uuid(), defenderId: e.defenderId, attackerId: e.attackerId,
+          shotClockBucket: e.bucket, confidence: e.confidence,
+        }
+        if (i === -1) next.push(ann)
+        else next[i] = ann
+      }
+      return { cellAnnotations: next }
+    }, implicit)
+  },
+
   restoreImported: ({ annotations, deadTimeBuckets, shotBuckets, reboundBuckets }) => {
-    set(s => ({
-      cellAnnotations: annotations,
-      deadTimeBuckets: deadTimeBuckets ?? s.deadTimeBuckets,
-      shotBuckets:     shotBuckets     ?? s.shotBuckets,
-      reboundBuckets:  reboundBuckets  ?? s.reboundBuckets,
-    }))
-    const qm = get().quarterMeta
-    persist('annotation', qm, get().cellAnnotations)
-    persist('deadtime',   qm, get().deadTimeBuckets)
-    persist('shot',       qm, get().shotBuckets)
-    persist('rebound',    qm, get().reboundBuckets)
+    applyTxn(
+      set, get, 'restore imported file',
+      ['cellAnnotations', 'deadTimeBuckets', 'shotBuckets', 'reboundBuckets'],
+      s => ({
+        cellAnnotations: annotations,
+        deadTimeBuckets: deadTimeBuckets ?? s.deadTimeBuckets,
+        shotBuckets:     shotBuckets     ?? s.shotBuckets,
+        reboundBuckets:  reboundBuckets  ?? s.reboundBuckets,
+      }),
+    )
+  },
+
+  undo: () => {
+    const res = undoHistory()
+    if (!res) return null
+    applyPatch(set, get, res.patch)
+    return res.label
+  },
+
+  redo: () => {
+    const res = redoHistory()
+    if (!res) return null
+    applyPatch(set, get, res.patch)
+    return res.label
   },
 
   dismissRestore: () => set({ pendingRestore: null }),

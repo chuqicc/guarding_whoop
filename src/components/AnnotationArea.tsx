@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { isEditableTarget } from '../utils/isEditableTarget'
 import { useStore } from '../store/useStore'
 import { COLOR_TEAM_A, COLOR_TEAM_B, QUARTER_BUCKET_S } from '../constants'
 import { getBucketDefendingTeamId } from '../utils/defenseTeam'
@@ -135,8 +136,16 @@ export default function AnnotationArea() {
       memoryBarrierFrames: s.memoryBarrierFrames,
       bucketFrameStart,
     })
-    for (const f of fills) {
-      s.setCellAnnotation(f.defenderId, f.attackerId, currentBucket, f.confidence)
+    if (fills.length > 0) {
+      s.setCellAnnotationsBatch(
+        fills.map(f => ({
+          defenderId: f.defenderId,
+          attackerId: f.attackerId,
+          bucket: currentBucket,
+          confidence: f.confidence,
+        })),
+        true,   // implicit: the app did this, not the annotator
+      )
     }
   }, [currentBucket]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -146,6 +155,7 @@ export default function AnnotationArea() {
   // eslint-disable-next-line react-hooks/rules-of-hooks
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (isEditableTarget(e.target)) return
       if (e.key === 'Escape') { setFocusedCell(null); return }
       if (!focusedCell) return
       if (e.key === '1' || e.key === '2' || e.key === '3') {
@@ -303,16 +313,16 @@ export default function AnnotationArea() {
                     position: 'relative', cursor: 'grab', userSelect: 'none',
                   }}>
                   <button
-                    onClick={() => useStore.getState().clearBucketAnnotations(b)}
-                    title="Clear all assignments in this column"
-                    style={{
-                      position: 'absolute', top: 1, right: 1,
-                      width: 14, height: 14, lineHeight: '12px',
-                      padding: 0, fontSize: 10, fontWeight: 700,
-                      background: 'transparent', color: 'var(--text-4)',
-                      border: '1px solid var(--border-dim)', borderRadius: 3,
-                      cursor: 'pointer',
+                    className="bucket-clear"
+                    // The header itself starts a scrub on mousedown; without
+                    // this the clear button also jumped the playhead.
+                    onMouseDown={e => e.stopPropagation()}
+                    onClick={e => {
+                      e.stopPropagation()
+                      useStore.getState().clearBucketAnnotations(b)
                     }}
+                    aria-label={`Clear all assignments at ${fmtClock(b)}`}
+                    title={`Clear all assignments in this column (${fmtClock(b)}) — undo with Ctrl+Z`}
                   >
                     ✕
                   </button>
