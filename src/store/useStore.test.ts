@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useStore } from './useStore'
-import type { PossessionMeta, Player } from './useStore'
+import type { QuarterMeta, Player } from './useStore'
 
 const TEAM_A = 100
 const TEAM_B = 200
@@ -8,8 +8,8 @@ const TEAM_B = 200
 const playersA: Player[] = [{ id: 1, name: 'Def One', jersey: '4', teamId: TEAM_A, teamAbbr: 'AAA' }]
 const playersB: Player[] = [{ id: 6, name: 'Att One', jersey: '10', teamId: TEAM_B, teamAbbr: 'BBB' }]
 
-const meta: PossessionMeta = {
-  filename: 'store_test', gameId: 'G1', quarter: 1, possessionIndex: 1,
+const meta: QuarterMeta = {
+  filename: 'store_test', gameId: 'G1', quarter: 1,
   teamA: { teamId: TEAM_A, abbr: 'AAA', players: playersA },
   teamB: { teamId: TEAM_B, abbr: 'BBB', players: playersB },
   defendingTeamId: TEAM_A,
@@ -19,7 +19,7 @@ const meta: PossessionMeta = {
 beforeEach(() => {
   localStorage.clear()
   useStore.setState({
-    possession: { ...meta }, quarterMeta: null, mode: 'possession',
+    quarterMeta: { ...meta },
     cellAnnotations: [], deadTimeBuckets: [], shotBuckets: [], reboundBuckets: [],
     memoryBarrierFrames: [], currentFrame: 0, autoFillMemory: true,
   })
@@ -44,9 +44,9 @@ describe('feature 2 — swap records a memory barrier', () => {
     useStore.setState({ currentFrame: 42 })
     useStore.getState().toggleDefendingTeam()
     const s = useStore.getState()
-    expect(s.possession?.defendingTeamId).toBe(TEAM_B)
+    expect(s.quarterMeta?.defendingTeamId).toBe(TEAM_B)
     expect(s.memoryBarrierFrames).toEqual([42])
-    expect(localStorage.getItem('membarrier_store_test')).toBe('[42]')
+    expect(localStorage.getItem('membarrier_quarter_store_test')).toBe('[42]')
   })
 
   it('swapping twice at the same frame stores the barrier once', () => {
@@ -72,7 +72,7 @@ describe('feature 4 — shot / rebound bucket marks', () => {
   it('toggleShotBucket marks, persists and unmarks', () => {
     useStore.getState().toggleShotBucket(15)
     expect(useStore.getState().shotBuckets).toEqual([15])
-    expect(localStorage.getItem('shot_store_test')).toBe('[15]')
+    expect(localStorage.getItem('shot_quarter_store_test')).toBe('[15]')
     useStore.getState().toggleShotBucket(15)
     expect(useStore.getState().shotBuckets).toEqual([])
   })
@@ -98,7 +98,7 @@ describe('restoreImported', () => {
     expect(s.deadTimeBuckets).toEqual([19])
     expect(s.shotBuckets).toEqual([20])
     expect(s.reboundBuckets).toEqual([18])
-    expect(localStorage.getItem('deadtime_store_test')).toBe('[19]')
+    expect(localStorage.getItem('deadtime_quarter_store_test')).toBe('[19]')
   })
 
   it('keeps existing bucket marks when the import has none (legacy formats)', () => {

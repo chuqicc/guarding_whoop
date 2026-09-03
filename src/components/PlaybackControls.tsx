@@ -17,13 +17,12 @@ export default function PlaybackControls() {
   const setCurrentFrame = useStore(s => s.setCurrentFrame)
   const playbackSpeed = useStore(s => s.playbackSpeed)
   const setSpeed = useStore(s => s.setSpeed)
-  const possession  = useStore(s => s.possession)
   const quarterMeta = useStore(s => s.quarterMeta)
 
   const frame = frames[currentFrame]
   const quarterClock = frame?.quarterClock ?? 0
   const shotClock = frame?.shotClock ?? null
-  const quarter = possession?.quarter ?? quarterMeta?.quarter ?? 1
+  const quarter = quarterMeta?.quarter ?? 1
 
   const speeds = [0.5, 1, 2, 4]
   const maxFrame = Math.max(0, frames.length - 1)

@@ -4,8 +4,7 @@ import { COLOR_TEAM_A, COLOR_TEAM_B, QUARTER_BUCKET_S } from '../constants'
 import { getBucketDefendingTeamId } from '../utils/defenseTeam'
 import { computeCarryForward } from '../utils/carryForward'
 
-const CELL_W_POSS    = 58   // px per shot-clock second (possession mode)
-const CELL_W_QUARTER = 36   // px per 1-second bucket (quarter mode)
+const CELL_W_QUARTER = 36   // px per 0.5s bucket
 const LABEL_W        = 160  // px for the sticky defender label column
 const HEADER_H       = 68   // px for header row (three lines)
 const ROW_H          = 44   // px per defender row
@@ -20,9 +19,7 @@ function fmtClock(s: number): string {
 }
 
 export default function AnnotationArea() {
-  const possession         = useStore(s => s.possession)
   const quarterMeta        = useStore(s => s.quarterMeta)
-  const mode               = useStore(s => s.mode)
   const frames             = useStore(s => s.frames)
   const currentFrame       = useStore(s => s.currentFrame)
   const cellAnnotations    = useStore(s => s.cellAnnotations)
@@ -32,9 +29,8 @@ export default function AnnotationArea() {
   const playerDict         = useStore(s => s.playerDict)
   const scrollRef          = useRef<HTMLDivElement>(null)
 
-  const meta   = possession ?? quarterMeta
-  const isQtr  = mode === 'quarter'
-  const CELL_W = isQtr ? CELL_W_QUARTER : CELL_W_POSS
+  const meta   = quarterMeta
+  const CELL_W = CELL_W_QUARTER
 
   if (!meta) {
     return (
@@ -61,27 +57,19 @@ export default function AnnotationArea() {
   const otherRows  = buildRows(otherTeam)
 
   // ── Buckets ──────────────────────────────────────────────────────────────
-  const getBucket = (qc: number, sc: number | null) =>
-    isQtr
-      ? Math.floor(qc / QUARTER_BUCKET_S) * QUARTER_BUCKET_S
-      : sc !== null && !isNaN(sc) ? Math.floor(sc) : null
+  const getBucket = (qc: number) =>
+    Math.floor(qc / QUARTER_BUCKET_S) * QUARTER_BUCKET_S
 
-  const buckets: number[] = isQtr
-    ? [...new Set(frames.map(f => Math.floor(f.quarterClock / QUARTER_BUCKET_S) * QUARTER_BUCKET_S))]
-        .sort((a, b) => b - a)
-    : [...new Set(
-        frames
-          .filter(f => f.shotClock !== null && !isNaN(f.shotClock!))
-          .map(f => Math.floor(f.shotClock!))
-      )].sort((a, b) => b - a)
+  const buckets: number[] =
+    [...new Set(frames.map(f => Math.floor(f.quarterClock / QUARTER_BUCKET_S) * QUARTER_BUCKET_S))]
+      .sort((a, b) => b - a)
 
   // Per-bucket: representative quarter clock + shot clock + first frame index
   const bucketQClock     = new Map<number, number>()
   const bucketShotClock  = new Map<number, number>()
   const bucketFrameStart = new Map<number, number>()
   for (const f of frames) {
-    const b = getBucket(f.quarterClock, f.shotClock)
-    if (b === null) continue
+    const b = getBucket(f.quarterClock)
     if (!bucketFrameStart.has(b) || f.frameIndex < bucketFrameStart.get(b)!) {
       bucketFrameStart.set(b, f.frameIndex)
     }
@@ -94,7 +82,7 @@ export default function AnnotationArea() {
 
   const frame = frames[currentFrame]
   const currentBucket: number | null = frame
-    ? getBucket(frame.quarterClock, frame.shotClock)
+    ? getBucket(frame.quarterClock)
     : null
 
   // Auto-scroll so current bucket column stays visible
@@ -290,19 +278,9 @@ export default function AnnotationArea() {
               borderBottom: '2px solid var(--border)', borderRight: '1px solid var(--border)',
               padding: '0 10px', height: HEADER_H, textAlign: 'left', verticalAlign: 'bottom',
             }}>
-              {isQtr ? (
-                <>
-                  <div style={{ fontSize: 11, color: 'var(--text-2)', fontWeight: 600 }}>Q-Clock</div>
-                  <div style={{ fontSize: 9,  color: 'var(--text-3)', marginTop: 1 }}>Shot</div>
-                  <div style={{ fontSize: 9,  color: 'var(--text-3)', marginTop: 1 }}>frame start</div>
-                </>
-              ) : (
-                <>
-                  <div style={{ fontSize: 11, color: 'var(--text-2)', fontWeight: 600 }}>Shot</div>
-                  <div style={{ fontSize: 9,  color: 'var(--text-3)', marginTop: 1 }}>Q-Clock</div>
-                  <div style={{ fontSize: 9,  color: 'var(--text-3)', marginTop: 1 }}>frame</div>
-                </>
-              )}
+              <div style={{ fontSize: 11, color: 'var(--text-2)', fontWeight: 600 }}>Q-Clock</div>
+              <div style={{ fontSize: 9,  color: 'var(--text-3)', marginTop: 1 }}>Shot</div>
+              <div style={{ fontSize: 9,  color: 'var(--text-3)', marginTop: 1 }}>frame start</div>
             </th>
 
             {/* Bucket headers */}
@@ -338,31 +316,15 @@ export default function AnnotationArea() {
                   >
                     ✕
                   </button>
-                  {isQtr ? (
-                    <>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: isActive ? '#4a90d9' : 'var(--text-3)', lineHeight: 1.2 }}>
-                        {fmtClock(b)}
-                      </div>
-                      <div style={{ fontSize: 9, color: isActive ? '#4a7ac8' : 'var(--text-4)', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
-                        {bucketShotClock.get(b) !== undefined ? bucketShotClock.get(b)!.toFixed(1) : ''}
-                      </div>
-                      <div style={{ fontSize: 9, color: isActive ? '#3a6aaa' : 'var(--text-4)', marginTop: 1, fontVariantNumeric: 'tabular-nums' }}>
-                        {fStart !== undefined ? `f${fStart}` : ''}
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: isActive ? '#4a90d9' : 'var(--text-3)', lineHeight: 1.1 }}>
-                        {b}
-                      </div>
-                      <div style={{ fontSize: 9, color: isActive ? '#4a7ac8' : 'var(--text-4)', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
-                        {bucketQClock.get(b) !== undefined ? fmtClock(bucketQClock.get(b)!) : '--:--'}
-                      </div>
-                      <div style={{ fontSize: 9, color: isActive ? '#3a6aaa' : 'var(--text-4)', marginTop: 1, fontVariantNumeric: 'tabular-nums' }}>
-                        {fStart !== undefined ? `f${fStart}` : ''}
-                      </div>
-                    </>
-                  )}
+                  <div style={{ fontSize: 11, fontWeight: 700, color: isActive ? '#4a90d9' : 'var(--text-3)', lineHeight: 1.2 }}>
+                    {fmtClock(b)}
+                  </div>
+                  <div style={{ fontSize: 9, color: isActive ? '#4a7ac8' : 'var(--text-4)', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
+                    {bucketShotClock.get(b) !== undefined ? bucketShotClock.get(b)!.toFixed(1) : ''}
+                  </div>
+                  <div style={{ fontSize: 9, color: isActive ? '#3a6aaa' : 'var(--text-4)', marginTop: 1, fontVariantNumeric: 'tabular-nums' }}>
+                    {fStart !== undefined ? `f${fStart}` : ''}
+                  </div>
                 </th>
               )
             })}

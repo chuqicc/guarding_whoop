@@ -2,13 +2,12 @@ import { useStore } from '../store/useStore'
 import { COLOR_TEAM_A, COLOR_TEAM_B } from '../constants'
 
 export default function RosterPanel() {
-  const possession          = useStore(s => s.possession)
   const quarterMeta         = useStore(s => s.quarterMeta)
   const toggleDefendingTeam = useStore(s => s.toggleDefendingTeam)
   const frames              = useStore(s => s.frames)
   const currentFrame        = useStore(s => s.currentFrame)
 
-  const meta = possession ?? quarterMeta
+  const meta = quarterMeta
 
   if (!meta) {
     return (

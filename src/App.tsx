@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import UploadPage from './pages/UploadPage'
-import PossessionSetupPage from './pages/PossessionSetupPage'
 import QuarterSetupPage from './pages/QuarterSetupPage'
-import VideoSplitPage from './pages/VideoSplitPage'
 import TopBar from './components/TopBar'
 import VideoPanel from './components/VideoPanel'
 import CourtCanvas from './components/CourtCanvas'
@@ -25,7 +23,7 @@ const ROSTER_MIN_W = 140
 const ROSTER_MAX_W = 500
 
 export default function App() {
-  const [page, setPage] = useState<'home' | 'possession-setup' | 'possession' | 'quarter-setup' | 'quarter' | 'split'>('home')
+  const [page, setPage] = useState<'home' | 'quarter-setup' | 'quarter'>('home')
   const [videoPx,  setVideoPx]  = useState(VIDEO_DEFAULT_W)
   const [topPx,    setTopPx]    = useState(TOP_DEFAULT_H)
   const [rosterPx, setRosterPx] = useState(ROSTER_DEFAULT_W)
@@ -170,19 +168,11 @@ export default function App() {
   // ── Page routing ─────────────────────────────────────────────────────────
   if (page === 'home') {
     return <UploadPage
-      onPossession={() => setPage('possession-setup')}
       onQuarter={() => setPage('quarter-setup')}
-      onSplit={() => setPage('split')}
     />
-  }
-  if (page === 'possession-setup') {
-    return <PossessionSetupPage onStart={() => setPage('possession')} onBack={() => setPage('home')} />
   }
   if (page === 'quarter-setup') {
     return <QuarterSetupPage onStart={() => setPage('quarter')} onBack={() => setPage('home')} />
-  }
-  if (page === 'split') {
-    return <VideoSplitPage onBack={() => setPage('home')} />
   }
 
   // ── Annotate page ─────────────────────────────────────────────────────────

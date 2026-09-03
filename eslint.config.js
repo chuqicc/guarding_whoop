@@ -6,7 +6,7 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores(['dist', 'dist_electron']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
@@ -17,6 +17,20 @@ export default defineConfig([
     ],
     languageOptions: {
       globals: globals.browser,
+    },
+    rules: {
+      // A conditional hook is a latent white-screen crash, not a style nit.
+      'react-hooks/rules-of-hooks': 'error',
+    },
+  },
+  {
+    // Electron main process + any other node-side scripts
+    files: ['**/*.mjs'],
+    extends: [js.configs.recommended],
+    languageOptions: {
+      globals: globals.node,
+      ecmaVersion: 'latest',
+      sourceType: 'module',
     },
   },
 ])

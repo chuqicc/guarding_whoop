@@ -15,11 +15,11 @@ export interface ImportedAnnotations {
   reboundBuckets?: number[]
 }
 
-export function parseAnnotationJSON(text: string, isQuarter: boolean): ImportedAnnotations {
+export function parseAnnotationJSON(text: string): ImportedAnnotations {
   const data = JSON.parse(text)
 
   if (Array.isArray(data?.buckets)) return parseV2(data)
-  if (Array.isArray(data?.frames))  return parseV1(data, isQuarter)
+  if (Array.isArray(data?.frames))  return parseV1(data)
   if (Array.isArray(data?.pairs))   return parseLegacyPairs(data)
 
   throw new Error('Unrecognized annotation JSON format')
@@ -62,21 +62,14 @@ function parseV2(data: any): ImportedAnnotations {
   return { annotations, deadTimeBuckets, shotBuckets, reboundBuckets }
 }
 
-function parseV1(data: any, isQuarter: boolean): ImportedAnnotations {
+function parseV1(data: any): ImportedAnnotations {
   const seen = new Map<string, CellAnnotation>()
   const deadTimeBuckets = new Set<number>()
 
   for (const f of data.frames) {
-    let bucket: number
-    if (isQuarter) {
-      const qc = parseFloat(f.quarter_clock)
-      if (isNaN(qc)) continue
-      bucket = Math.round(Math.floor(qc / QUARTER_BUCKET_S) * QUARTER_BUCKET_S * 1e6) / 1e6
-    } else {
-      const sc = parseFloat(f.shot_clock)
-      if (isNaN(sc)) continue
-      bucket = Math.floor(sc)
-    }
+    const qc = parseFloat(f.quarter_clock)
+    if (isNaN(qc)) continue
+    const bucket = Math.round(Math.floor(qc / QUARTER_BUCKET_S) * QUARTER_BUCKET_S * 1e6) / 1e6
 
     if (f.gamestatus === 'dead') { deadTimeBuckets.add(bucket); continue }
     if (!Array.isArray(f.assignments)) continue

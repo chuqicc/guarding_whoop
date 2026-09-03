@@ -1,11 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
+import { parsePlayerDict } from '../utils/parseCSV'
 
 const PDATA_KEY      = 'pdata_csv'
 const PDATA_NAME_KEY = 'pdata_name'
-
-// Video Quarter Splitter entry — hidden for now (feature not needed)
-const SHOW_VIDEO_SPLITTER = false
 
 function readFile(file: File): Promise<string> {
   return new Promise((res, rej) => {
@@ -17,36 +15,43 @@ function readFile(file: File): Promise<string> {
 }
 
 interface Props {
-  onPossession: () => void
   onQuarter:    () => void
-  onSplit:      () => void
 }
 
-export default function UploadPage({ onPossession:_onPossession, onQuarter, onSplit }: Props) {
+export default function UploadPage({ onQuarter }: Props) {
   const loadPlayerDict = useStore(s => s.loadPlayerDict)
   const playerDict     = useStore(s => s.playerDict)
   const theme          = useStore(s => s.theme)
   const toggleTheme    = useStore(s => s.toggleTheme)
 
-  const [pdataName,   setPdataName]   = useState<string | null>(null)
-  const [pdataCached, setPdataCached] = useState(false)
+  // Read (and validate) the cached player CSV once, at mount, so the initial
+  // render is already correct instead of being patched by a setState in an effect.
+  const [cached] = useState<{ csv: string | null; name: string | null }>(() => {
+    const csv = localStorage.getItem(PDATA_KEY)
+    if (!csv) return { csv: null, name: null }
+    try {
+      if (Object.keys(parsePlayerDict(csv)).length === 0) throw new Error('empty player dict')
+      return { csv, name: localStorage.getItem(PDATA_NAME_KEY) ?? 'player_data.csv' }
+    } catch {
+      localStorage.removeItem(PDATA_KEY)
+      localStorage.removeItem(PDATA_NAME_KEY)
+      return { csv: null, name: null }
+    }
+  })
+
+  const [pdataName,   setPdataName]   = useState<string | null>(cached.name)
+  const [pdataCached, setPdataCached] = useState(!!cached.csv)
   const [error,       setError]       = useState<string | null>(null)
 
   const pdataInputRef = useRef<HTMLInputElement>(null)
   const playerLoaded  = Object.keys(playerDict).length > 0
 
+  // Push the validated cache into the store (an external system), nothing else.
   useEffect(() => {
-    if (playerLoaded) {
-      const name = localStorage.getItem(PDATA_NAME_KEY) ?? 'player_data.csv'
-      setPdataName(name); setPdataCached(true); return
+    if (cached.csv && Object.keys(useStore.getState().playerDict).length === 0) {
+      loadPlayerDict(cached.csv)
     }
-    const cached = localStorage.getItem(PDATA_KEY)
-    const name   = localStorage.getItem(PDATA_NAME_KEY) ?? 'player_data.csv'
-    if (cached) {
-      try { loadPlayerDict(cached); setPdataName(name); setPdataCached(true) }
-      catch { localStorage.removeItem(PDATA_KEY); localStorage.removeItem(PDATA_NAME_KEY) }
-    }
-  }, []) // eslint-disable-line
+  }, [cached.csv, loadPlayerDict])
 
   const handlePdata = async (file: File) => {
     if (!file.name.endsWith('.csv')) { setError('player_data must be a .csv file'); return }
@@ -133,25 +138,6 @@ export default function UploadPage({ onPossession:_onPossession, onQuarter, onSp
           </div>
         )}
 
-        {/* Video Quarter Splitter — hidden for now, flip to true to restore */}
-        {SHOW_VIDEO_SPLITTER && (
-          <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-              <span style={{ fontSize: 11, color: 'var(--text-4)' }}>tools</span>
-              <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-            </div>
-
-            <ModeButton
-              icon="✂"
-              label="Video Quarter Splitter"
-              description="Split a full-game video into individual quarter clips"
-              enabled={true}
-              onClick={onSplit}
-            />
-          </>
-        )}
-
         {/* Divider */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
@@ -168,14 +154,6 @@ export default function UploadPage({ onPossession:_onPossession, onQuarter, onSp
           onClick={onQuarter}
         />
 
-        {/* Mode: Annotate Ball Possession — not in use */}
-        <ModeButton
-          icon="🏀"
-          label="Annotate Ball Possession"
-          description="Per-possession defensive assignment on tracking data"
-          enabled={false}
-          disabledHint="Not currently in use"
-        />
       </div>
     </div>
   )

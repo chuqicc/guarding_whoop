@@ -48,9 +48,7 @@ export default function CourtCanvas() {
   const flipY              = useStore(s => s.flipY)
   const toggleFlipX        = useStore(s => s.toggleFlipX)
   const toggleFlipY        = useStore(s => s.toggleFlipY)
-  const possession         = useStore(s => s.possession)
   const quarterMeta        = useStore(s => s.quarterMeta)
-  const mode               = useStore(s => s.mode)
   const theme              = useStore(s => s.theme)
   const setCellAnnotation       = useStore(s => s.setCellAnnotation)
 
@@ -58,7 +56,7 @@ export default function CourtCanvas() {
   const selectionRingColor = theme === 'light' ? '#1a1d2a' : '#ffffff'
   const hoverRingColor     = theme === 'light' ? '#c08a2c' : '#ffd700'
 
-  const meta = possession ?? quarterMeta
+  const meta = quarterMeta
 
   useEffect(() => {
     const img = new window.Image()
@@ -87,11 +85,9 @@ export default function CourtCanvas() {
   const { w: stageW, h: stageH, offsetX, offsetY } = fitStage(containerSize.w, containerSize.h)
 
   const frame = frames[currentFrame]
-  const currentBucket = mode === 'quarter'
-    ? (frame ? Math.floor(frame.quarterClock / QUARTER_BUCKET_S) * QUARTER_BUCKET_S : null)
-    : (frame?.shotClock !== null && frame?.shotClock !== undefined && !isNaN(frame.shotClock)
-        ? Math.floor(frame.shotClock)
-        : null)
+  const currentBucket = frame
+    ? Math.floor(frame.quarterClock / QUARTER_BUCKET_S) * QUARTER_BUCKET_S
+    : null
 
   const activePairs = currentBucket !== null
     ? cellAnnotations.filter(c => c.shotClockBucket === currentBucket)

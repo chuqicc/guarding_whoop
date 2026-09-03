@@ -5,7 +5,7 @@ import { QUARTER_BUCKET_S } from '../constants'
 // Parse a previously exported per-frame annotation CSV (exportFrameCSV) back
 // into CellAnnotation[]. One annotation is kept per (defender, bucket) pair —
 // duplicate frame rows for the same bucket collapse to a single entry.
-export function parseAnnotationCSV(csvText: string, isQuarter: boolean): CellAnnotation[] {
+export function parseAnnotationCSV(csvText: string): CellAnnotation[] {
   const lines = csvText.trim().split('\n')
   const headers = lines[0].split(',').map(h => h.trim())
 
@@ -13,7 +13,6 @@ export function parseAnnotationCSV(csvText: string, isQuarter: boolean): CellAnn
   const iDefenderId   = headers.indexOf('defender_id')
   const iAttackerId   = headers.indexOf('attacker_id')
   const iQuarterClock = headers.indexOf('quarter_clock')
-  const iShotClock    = headers.indexOf('shot_clock')
   const iConfidence   = headers.indexOf('confidence')
 
   const seen = new Map<string, CellAnnotation>()
@@ -30,16 +29,9 @@ export function parseAnnotationCSV(csvText: string, isQuarter: boolean): CellAnn
     const attackerId: AttackerId = attRaw === 'GUARD_NONE' ? 'GUARD_NONE' : parseInt(attRaw)
     if (typeof attackerId === 'number' && isNaN(attackerId)) continue
 
-    let bucket: number
-    if (isQuarter) {
-      const qc = parseFloat(cols[iQuarterClock])
-      if (isNaN(qc)) continue
-      bucket = Math.round(Math.floor(qc / QUARTER_BUCKET_S) * QUARTER_BUCKET_S * 1e6) / 1e6
-    } else {
-      const sc = parseFloat(cols[iShotClock])
-      if (isNaN(sc)) continue
-      bucket = Math.floor(sc)
-    }
+    const qc = parseFloat(cols[iQuarterClock])
+    if (isNaN(qc)) continue
+    const bucket = Math.round(Math.floor(qc / QUARTER_BUCKET_S) * QUARTER_BUCKET_S * 1e6) / 1e6
 
     let confidence: 1 | 2 | 3 | undefined
     if (iConfidence !== -1) {

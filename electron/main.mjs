@@ -1,47 +1,23 @@
 /**
  * Electron main process.
- * Starts the Express/FFmpeg server in-process, then opens a BrowserWindow.
+ * Loads the built frontend directly from disk — no HTTP server involved.
  */
 import { app, BrowserWindow, shell } from 'electron'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
-import { createServer } from 'net'
 
-const __dirname  = dirname(fileURLToPath(import.meta.url))
-const isDev      = !app.isPackaged
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const isDev     = !app.isPackaged
 
-// Pick a free port so we never clash with whatever the user has running
-function freePort () {
-  return new Promise(resolve => {
-    const srv = createServer()
-    srv.listen(0, '127.0.0.1', () => {
-      const { port } = srv.address()
-      srv.close(() => resolve(port))
-    })
-  })
-}
+// In a packaged app dist/ is copied into resources/ (see build.extraResources).
+// In dev it sits next to electron/ in the project root.
+const DIST_DIR = isDev
+  ? join(__dirname, '..', 'dist')
+  : join(process.resourcesPath, 'dist')
 
 let mainWindow
 
-async function start () {
-  const port = await freePort()
-
-  // Tell server.mjs which port to use and where dist/ lives
-  process.env.PORT     = String(port)
-  process.env.NODE_ENV = 'production'
-
-  // In packaged app, dist/ is placed in resources/ (extraResources).
-  // In dev, it lives next to server.mjs in the project root.
-  process.env.DIST_DIR = isDev
-    ? join(__dirname, '..', 'dist')
-    : join(process.resourcesPath, 'dist')
-
-  // Import server — top-level awaits run, Express starts, app.listen() fires
-  await import('../server.mjs')
-
-  // Brief pause so the server socket is accepting before we navigate
-  await new Promise(r => setTimeout(r, 600))
-
+function createWindow () {
   mainWindow = new BrowserWindow({
     width:  1440,
     height: 900,
@@ -54,7 +30,7 @@ async function start () {
     },
   })
 
-  mainWindow.loadURL(`http://127.0.0.1:${port}`)
+  mainWindow.loadFile(join(DIST_DIR, 'index.html'))
 
   // Open external links in the system browser, not in Electron
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -62,10 +38,18 @@ async function start () {
     return { action: 'deny' }
   })
 
+  // Block in-page navigation away from the bundled app
+  mainWindow.webContents.on('will-navigate', (e, url) => {
+    if (!url.startsWith('file://')) {
+      e.preventDefault()
+      shell.openExternal(url)
+    }
+  })
+
   if (isDev) mainWindow.webContents.openDevTools()
 
   mainWindow.on('closed', () => { mainWindow = null })
 }
 
-app.whenReady().then(start)
+app.whenReady().then(createWindow)
 app.on('window-all-closed', () => app.quit())

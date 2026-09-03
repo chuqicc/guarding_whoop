@@ -1,8 +1,8 @@
-import type { CellAnnotation, TrackingFrame, PossessionMeta, QuarterMeta, Player, AttackerId, AnnotationNote } from '../store/useStore'
+import type { CellAnnotation, TrackingFrame, QuarterMeta, Player, AttackerId, AnnotationNote } from '../store/useStore'
 import { QUARTER_BUCKET_S } from '../constants'
 import { getBucketDefendingTeamId } from './defenseTeam'
 
-type ExportMeta = PossessionMeta | QuarterMeta
+type ExportMeta = QuarterMeta
 
 // All export functions take the same bundle of inputs
 export interface ExportInput {
@@ -22,13 +22,8 @@ function resolveAttacker(id: AttackerId, playerDict: Record<number, Player>) {
   return id === 'GUARD_NONE' ? null : playerDict[id as number]
 }
 
-function isPossession(meta: ExportMeta): meta is PossessionMeta {
-  return 'possessionIndex' in meta
-}
-
-function getFrameBucket(frame: TrackingFrame, isQuarter: boolean): number | null {
-  if (isQuarter) return Math.floor(frame.quarterClock / QUARTER_BUCKET_S) * QUARTER_BUCKET_S
-  return frame.shotClock !== null && !isNaN(frame.shotClock) ? Math.floor(frame.shotClock) : null
+function getFrameBucket(frame: TrackingFrame): number {
+  return Math.floor(frame.quarterClock / QUARTER_BUCKET_S) * QUARTER_BUCKET_S
 }
 
 // ── Concise bucket-based JSON export (format v2) ──────────────────────────
@@ -57,7 +52,6 @@ export interface ExportBucketRow {
 export function buildAnnotationExport(input: ExportInput) {
   const { annotations, deadTimeBuckets, shotBuckets, reboundBuckets,
           frames, meta, playerDict, annotatorName, annotationSeconds, notes } = input
-  const isPoss  = isPossession(meta)
   const deadSet = new Set(deadTimeBuckets)
 
   // Group frames by bucket, keeping chronological extents
@@ -69,7 +63,7 @@ export function buildAnnotationExport(input: ExportInput) {
   }
   const groups = new Map<number, Grp>()
   for (const f of frames) {
-    const b = getFrameBucket(f, !isPoss)
+    const b = getFrameBucket(f)
     if (b === null) continue
     const g = groups.get(b)
     if (!g) {
@@ -144,9 +138,9 @@ export function buildAnnotationExport(input: ExportInput) {
     meta: {
       game_id:     meta.gameId,
       quarter:     meta.quarter,
-      mode:        isPoss ? 'possession' : 'quarter',
+      mode:        'quarter',
       source_file: meta.filename,
-      bucket_unit: isPoss ? 'shot_clock_s' : `quarter_clock_${QUARTER_BUCKET_S}s`,
+      bucket_unit: `quarter_clock_${QUARTER_BUCKET_S}s`,
       teams:       [ { id: meta.teamA.teamId, abbr: meta.teamA.abbr },
                      { id: meta.teamB.teamId, abbr: meta.teamB.abbr } ],
       players,
@@ -171,7 +165,6 @@ export function exportJSON(input: ExportInput) {
 export function buildFrameCSV(input: ExportInput): string {
   const { annotations, deadTimeBuckets, shotBuckets, reboundBuckets,
           frames, meta, playerDict, annotatorName } = input
-  const isPoss  = isPossession(meta)
   const deadSet = new Set(deadTimeBuckets)
 
   const headers = [
@@ -185,7 +178,7 @@ export function buildFrameCSV(input: ExportInput): string {
   const rows: string[] = []
 
   for (const frame of frames) {
-    const bucket = getFrameBucket(frame, !isPoss)
+    const bucket = getFrameBucket(frame)
     if (bucket === null) continue
 
     const isDead    = deadSet.has(bucket)

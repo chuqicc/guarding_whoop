@@ -20,16 +20,13 @@ interface Props {
 export default function TopBar({ onNewSession }: Props) {
   const theme              = useStore(s => s.theme)
   const toggleTheme        = useStore(s => s.toggleTheme)
-  const possession         = useStore(s => s.possession)
   const quarterMeta        = useStore(s => s.quarterMeta)
-  const mode               = useStore(s => s.mode)
   const frames             = useStore(s => s.frames)
   const currentFrame       = useStore(s => s.currentFrame)
   const cellAnnotations    = useStore(s => s.cellAnnotations)
   const deadTimeBuckets    = useStore(s => s.deadTimeBuckets)
   const playerDict         = useStore(s => s.playerDict)
   const setCellAnnotations = useStore(s => s.setCellAnnotations)
-  const loadPossession     = useStore(s => s.loadPossession)
   const loadQuarter        = useStore(s => s.loadQuarter)
   const annotatorName      = useStore(s => s.annotatorName)
   const setAnnotatorName   = useStore(s => s.setAnnotatorName)
@@ -51,9 +48,9 @@ export default function TopBar({ onNewSession }: Props) {
   const importCSVRef      = useRef<HTMLInputElement>(null)
   const swapRef           = useRef<HTMLInputElement>(null)
 
-  const meta = possession ?? quarterMeta
+  const meta = quarterMeta
 
-  // Track annotation time while a quarter/possession is loaded and the tab is visible
+  // Track annotation time while a quarter is loaded and the tab is visible
   useEffect(() => {
     if (!meta) return
     const interval = setInterval(() => {
@@ -65,7 +62,6 @@ export default function TopBar({ onNewSession }: Props) {
   }, [meta])
 
   const frame     = frames[currentFrame]
-  const shotClock = frame?.shotClock ?? null
 
   const defTeam = meta
     ? (meta.defendingTeamId === meta.teamA.teamId ? meta.teamA.abbr : meta.teamB.abbr)
@@ -77,9 +73,7 @@ export default function TopBar({ onNewSession }: Props) {
   const canExport = !!meta  // allow export whenever tracking data is loaded
 
   const currentBucket: number | null = frame
-    ? (mode === 'quarter'
-        ? Math.floor(frame.quarterClock / QUARTER_BUCKET_S) * QUARTER_BUCKET_S
-        : (frame.shotClock !== null && !isNaN(frame.shotClock) ? Math.floor(frame.shotClock) : null))
+    ? Math.floor(frame.quarterClock / QUARTER_BUCKET_S) * QUARTER_BUCKET_S
     : null
 
   const onCourtIds    = new Set((frames[currentFrame]?.players ?? []).map(p => p.id))
@@ -96,18 +90,14 @@ export default function TopBar({ onNewSession }: Props) {
 
   const handleSwap = async (file: File) => {
     try {
-      if (mode === 'quarter') {
-        loadQuarter(await readFile(file), file.name)
-      } else {
-        loadPossession(await readFile(file), file.name)
-      }
+      loadQuarter(await readFile(file), file.name)
       setError(null)
     } catch (e) { setError(`Failed to load: ${e}`) }
   }
 
   const handleImportJSON = async (file: File) => {
     try {
-      const imported = parseAnnotationJSON(await readFile(file), mode === 'quarter')
+      const imported = parseAnnotationJSON(await readFile(file))
       restoreImported(imported)
       setError(null)
     } catch (e) { setError(`Import failed: ${e}`) }
@@ -115,7 +105,7 @@ export default function TopBar({ onNewSession }: Props) {
 
   const handleImportCSV = async (file: File) => {
     try {
-      const anns = parseAnnotationCSV(await readFile(file), mode === 'quarter')
+      const anns = parseAnnotationCSV(await readFile(file))
       setCellAnnotations(anns)
       setError(null)
     } catch (e) { setError(`Import failed: ${e}`) }
@@ -163,7 +153,7 @@ export default function TopBar({ onNewSession }: Props) {
       </button>
 
       <span style={{ fontSize: 12, color: 'var(--text-3)', fontWeight: 600, letterSpacing: '0.03em' }}>
-        {mode === 'quarter' ? 'Annotate Quarter' : 'Annotate Ball Possession'}
+        Annotate Quarter
       </span>
 
       <div style={divider} />
@@ -177,22 +167,12 @@ export default function TopBar({ onNewSession }: Props) {
           <span style={{ color: 'var(--text-2)', fontSize: 12 }}>
             Q<strong style={{ color: 'var(--text-1)' }}>{meta.quarter}</strong>
           </span>
-          {possession && (
-            <span style={{ color: 'var(--text-2)', fontSize: 12 }}>
-              Poss <strong style={{ color: 'var(--text-1)' }}>#{possession.possessionIndex}</strong>
-            </span>
-          )}
           <span style={{ fontSize: 12 }}>
             <strong style={{ color: 'var(--accent)' }}>{defTeam}</strong>
             <span style={{ color: 'var(--text-3)' }}> DEF vs </span>
             <strong style={{ color: 'var(--accent-danger)' }}>{attTeam}</strong>
             <span style={{ color: 'var(--text-3)' }}> ATT</span>
           </span>
-          {shotClock !== null && mode !== 'quarter' && (
-            <span style={{ fontSize: 12, color: shotClock <= 5 ? 'var(--accent-danger)' : 'var(--text-3)' }}>
-              Shot <strong style={{ color: shotClock <= 5 ? 'var(--accent-danger)' : 'var(--text-2)' }}>{shotClock.toFixed(1)}</strong>
-            </span>
-          )}
         </>
       ) : (
         <span style={{ color: '#444', fontSize: 12 }}>No data loaded</span>
@@ -347,10 +327,10 @@ export default function TopBar({ onNewSession }: Props) {
 
         {/* Swap file */}
         <label {...makeDrop(handleSwap)} style={btnStyle(false)}
-          title={mode === 'quarter' ? 'Load a different quarter JSON' : 'Load a different possession CSV'}>
-          📂 {mode === 'quarter' ? 'Swap quarter' : 'Swap possession'}
+          title="Load a different quarter JSON">
+          📂 Swap quarter
           <input ref={swapRef} type="file"
-            accept={mode === 'quarter' ? '.json' : '.csv'}
+            accept=".json"
             style={{ display: 'none' }}
             onChange={e => { if (e.target.files?.[0]) handleSwap(e.target.files[0]) }} />
         </label>

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { v4 as uuid } from 'uuid'
-import { parsePlayerDict, parsePossession } from '../utils/parseCSV'
+import { parsePlayerDict } from '../utils/parseCSV'
 import { parseQuarterJSON } from '../utils/parseQuarterJSON'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -22,19 +22,6 @@ export interface TrackingFrame {
   ballY: number
   ballZ: number
   players: Array<{ id: number; teamId: number; x: number; y: number }>
-}
-
-export interface PossessionMeta {
-  filename: string          // original CSV filename without extension
-  gameId: string
-  quarter: number
-  possessionIndex: number
-  teamA: { teamId: number; abbr: string; players: Player[] }  // slots 1-5
-  teamB: { teamId: number; abbr: string; players: Player[] }  // slots 6-10
-  defendingTeamId: number   // user can toggle which team defends
-  totalFrames: number
-  startClock: number        // quarter_clock of first frame (higher value)
-  endClock: number          // quarter_clock of last frame (lower value)
 }
 
 export interface QuarterMeta {
@@ -74,9 +61,7 @@ interface AppStore {
   // ── Data ──
   playerDict: Record<number, Player>
   frames: TrackingFrame[]
-  possession: PossessionMeta | null
   quarterMeta: QuarterMeta | null
-  mode: 'possession' | 'quarter' | null
 
   // ── Playback ──
   currentFrame: number
@@ -114,7 +99,6 @@ interface AppStore {
 
   // ── Actions ──
   loadPlayerDict: (csvText: string) => void
-  loadPossession: (csvText: string, filename: string) => void
   loadQuarter: (jsonText: string, filename: string) => void
   toggleDeadTimeBucket: (bucket: number) => void
   toggleShotBucket: (bucket: number) => void
@@ -144,10 +128,15 @@ interface AppStore {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function fileKey(prefix: string, possession: PossessionMeta | null, quarterMeta: QuarterMeta | null): string | null {
-  if (possession)  return `${prefix}_${possession.filename}`
-  if (quarterMeta) return `${prefix}_quarter_${quarterMeta.filename}`
-  return null
+function fileKey(prefix: string, quarterMeta: QuarterMeta | null): string | null {
+  return quarterMeta ? `${prefix}_quarter_${quarterMeta.filename}` : null
+}
+
+// Single persistence entry point. Every mutator routes through this, so there is
+// no code path that can mutate state and forget to write it back.
+function persist(prefix: string, quarterMeta: QuarterMeta | null, value: unknown): void {
+  const key = fileKey(prefix, quarterMeta)
+  if (key) localStorage.setItem(key, JSON.stringify(value))
 }
 
 function loadNotes(key: string | null): AnnotationNote[] {
@@ -184,9 +173,7 @@ function loadNumber(key: string | null): number {
 export const useStore = create<AppStore>((set, get) => ({
   playerDict: {},
   frames: [],
-  possession: null,
   quarterMeta: null,
-  mode: null,
   currentFrame: 0,
   isPlaying: false,
   isVideoPlaying: false,
@@ -211,30 +198,6 @@ export const useStore = create<AppStore>((set, get) => ({
     set({ playerDict: dict })
   },
 
-  loadPossession: (csvText, filename) => {
-    const { playerDict } = get()
-    const { frames, possession } = parsePossession(csvText, filename, playerDict)
-    const key = `annotation_${possession.filename}`
-    let pendingRestore: CellAnnotation[] | null = null
-    const saved = localStorage.getItem(key)
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved) as CellAnnotation[]
-        if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].shotClockBucket !== undefined) {
-          pendingRestore = parsed
-        }
-      } catch { /* ignore */ }
-    }
-    const deadSaved = localStorage.getItem(`deadtime_${possession.filename}`)
-    const deadTimeBuckets: number[] = deadSaved ? JSON.parse(deadSaved) : []
-    const shotBuckets    = loadNumberArray(`shot_${possession.filename}`)
-    const reboundBuckets = loadNumberArray(`rebound_${possession.filename}`)
-    const memoryBarrierFrames = loadNumberArray(`membarrier_${possession.filename}`)
-    const notes = loadNotes(`notes_${possession.filename}`)
-    const annotationSeconds = loadNumber(`anntime_${possession.filename}`)
-    set({ frames, possession, quarterMeta: null, mode: 'possession', currentFrame: 0, isPlaying: false, cellAnnotations: [], deadTimeBuckets, shotBuckets, reboundBuckets, memoryBarrierFrames, pendingRestore, notes, annotationSeconds })
-  },
-
   loadQuarter: (jsonText, filename) => {
     const { frames, quarterMeta, playerDict } = parseQuarterJSON(jsonText, filename)
     const key = `annotation_quarter_${quarterMeta.filename}`
@@ -255,7 +218,7 @@ export const useStore = create<AppStore>((set, get) => ({
     const memoryBarrierFrames = loadNumberArray(`membarrier_quarter_${quarterMeta.filename}`)
     const notes = loadNotes(`notes_quarter_${quarterMeta.filename}`)
     const annotationSeconds = loadNumber(`anntime_quarter_${quarterMeta.filename}`)
-    set({ frames, quarterMeta, possession: null, playerDict, mode: 'quarter', currentFrame: 0, isPlaying: false, cellAnnotations: [], deadTimeBuckets, shotBuckets, reboundBuckets, memoryBarrierFrames, pendingRestore, notes, annotationSeconds })
+    set({ frames, quarterMeta, playerDict, currentFrame: 0, isPlaying: false, cellAnnotations: [], deadTimeBuckets, shotBuckets, reboundBuckets, memoryBarrierFrames, pendingRestore, notes, annotationSeconds })
   },
 
   setCurrentFrame:  (n) => set({ currentFrame: n }),
@@ -264,23 +227,18 @@ export const useStore = create<AppStore>((set, get) => ({
   setSpeed:         (v) => set({ playbackSpeed: v }),
 
   toggleDefendingTeam: () => {
-    const { possession, quarterMeta, currentFrame, memoryBarrierFrames } = get()
+    const { quarterMeta, currentFrame, memoryBarrierFrames } = get()
     // Swapping possession wipes the auto-fill memory: record a barrier at the
     // current frame so assignments from before the swap are never carried forward.
     const barriers = memoryBarrierFrames.includes(currentFrame)
       ? memoryBarrierFrames
       : [...memoryBarrierFrames, currentFrame].sort((a, b) => a - b)
-    if (possession) {
-      const newDefId = possession.defendingTeamId === possession.teamA.teamId
-        ? possession.teamB.teamId : possession.teamA.teamId
-      set({ possession: { ...possession, defendingTeamId: newDefId }, memoryBarrierFrames: barriers })
-    } else if (quarterMeta) {
+    if (quarterMeta) {
       const newDefId = quarterMeta.defendingTeamId === quarterMeta.teamA.teamId
         ? quarterMeta.teamB.teamId : quarterMeta.teamA.teamId
       set({ quarterMeta: { ...quarterMeta, defendingTeamId: newDefId }, memoryBarrierFrames: barriers })
     }
-    const key = fileKey('membarrier', get().possession, get().quarterMeta)
-    if (key) localStorage.setItem(key, JSON.stringify(get().memoryBarrierFrames))
+    persist('membarrier', get().quarterMeta, get().memoryBarrierFrames)
   },
 
   setCellAnnotation: (defenderId, attackerId, bucket, confidence) => {
@@ -299,11 +257,7 @@ export const useStore = create<AppStore>((set, get) => ({
       }
       return { cellAnnotations: [...filtered, newAnn] }
     })
-    const { possession, quarterMeta, cellAnnotations } = get()
-    const lsKey = possession
-      ? `annotation_${possession.filename}`
-      : quarterMeta ? `annotation_quarter_${quarterMeta.filename}` : null
-    if (lsKey) localStorage.setItem(lsKey, JSON.stringify(cellAnnotations))
+    persist('annotation', get().quarterMeta, get().cellAnnotations)
   },
 
   setCellConfidence: (defenderId, bucket, confidence) => {
@@ -314,31 +268,22 @@ export const useStore = create<AppStore>((set, get) => ({
           : c
       ),
     }))
-    const { possession, quarterMeta, cellAnnotations } = get()
-    const lsKey = possession
-      ? `annotation_${possession.filename}`
-      : quarterMeta ? `annotation_quarter_${quarterMeta.filename}` : null
-    if (lsKey) localStorage.setItem(lsKey, JSON.stringify(cellAnnotations))
+    persist('annotation', get().quarterMeta, get().cellAnnotations)
   },
 
   removeCellAnnotation: (id) => {
     set(s => ({ cellAnnotations: s.cellAnnotations.filter(c => c.id !== id) }))
-    const { possession, quarterMeta, cellAnnotations } = get()
-    const lsKey = possession
-      ? `annotation_${possession.filename}`
-      : quarterMeta ? `annotation_quarter_${quarterMeta.filename}` : null
-    if (lsKey) localStorage.setItem(lsKey, JSON.stringify(cellAnnotations))
+    persist('annotation', get().quarterMeta, get().cellAnnotations)
   },
 
-  setCellAnnotations: (anns) => set({ cellAnnotations: anns }),
+  setCellAnnotations: (anns) => {
+    set({ cellAnnotations: anns })
+    persist('annotation', get().quarterMeta, get().cellAnnotations)
+  },
 
   clearBucketAnnotations: (bucket) => {
     set(s => ({ cellAnnotations: s.cellAnnotations.filter(c => c.shotClockBucket !== bucket) }))
-    const { possession, quarterMeta, cellAnnotations } = get()
-    const lsKey = possession
-      ? `annotation_${possession.filename}`
-      : quarterMeta ? `annotation_quarter_${quarterMeta.filename}` : null
-    if (lsKey) localStorage.setItem(lsKey, JSON.stringify(cellAnnotations))
+    persist('annotation', get().quarterMeta, get().cellAnnotations)
   },
 
   toggleDeadTimeBucket: (bucket) => {
@@ -348,11 +293,7 @@ export const useStore = create<AppStore>((set, get) => ({
         : [...s.deadTimeBuckets, bucket]
       return { deadTimeBuckets: next }
     })
-    const { possession, quarterMeta, deadTimeBuckets } = get()
-    const key = possession
-      ? `deadtime_${possession.filename}`
-      : quarterMeta ? `deadtime_quarter_${quarterMeta.filename}` : null
-    if (key) localStorage.setItem(key, JSON.stringify(deadTimeBuckets))
+    persist('deadtime', get().quarterMeta, get().deadTimeBuckets)
   },
 
   toggleShotBucket: (bucket) => {
@@ -361,9 +302,7 @@ export const useStore = create<AppStore>((set, get) => ({
         ? s.shotBuckets.filter(b => b !== bucket)
         : [...s.shotBuckets, bucket],
     }))
-    const { possession, quarterMeta, shotBuckets } = get()
-    const key = fileKey('shot', possession, quarterMeta)
-    if (key) localStorage.setItem(key, JSON.stringify(shotBuckets))
+    persist('shot', get().quarterMeta, get().shotBuckets)
   },
 
   toggleReboundBucket: (bucket) => {
@@ -372,9 +311,7 @@ export const useStore = create<AppStore>((set, get) => ({
         ? s.reboundBuckets.filter(b => b !== bucket)
         : [...s.reboundBuckets, bucket],
     }))
-    const { possession, quarterMeta, reboundBuckets } = get()
-    const key = fileKey('rebound', possession, quarterMeta)
-    if (key) localStorage.setItem(key, JSON.stringify(reboundBuckets))
+    persist('rebound', get().quarterMeta, get().reboundBuckets)
   },
 
   toggleAutoFillMemory: () => {
@@ -390,15 +327,11 @@ export const useStore = create<AppStore>((set, get) => ({
       shotBuckets:     shotBuckets     ?? s.shotBuckets,
       reboundBuckets:  reboundBuckets  ?? s.reboundBuckets,
     }))
-    const { possession, quarterMeta } = get()
-    const save = (prefix: string, value: unknown) => {
-      const key = fileKey(prefix, possession, quarterMeta)
-      if (key) localStorage.setItem(key, JSON.stringify(value))
-    }
-    save('annotation', get().cellAnnotations)
-    save('deadtime',   get().deadTimeBuckets)
-    save('shot',       get().shotBuckets)
-    save('rebound',    get().reboundBuckets)
+    const qm = get().quarterMeta
+    persist('annotation', qm, get().cellAnnotations)
+    persist('deadtime',   qm, get().deadTimeBuckets)
+    persist('shot',       qm, get().shotBuckets)
+    persist('rebound',    qm, get().reboundBuckets)
   },
 
   dismissRestore: () => set({ pendingRestore: null }),
@@ -417,16 +350,12 @@ export const useStore = create<AppStore>((set, get) => ({
     set(s => ({
       notes: [...s.notes, { id: uuid(), bucket, defenderId, text, createdAt: new Date().toISOString() }],
     }))
-    const { possession, quarterMeta, notes } = get()
-    const key = fileKey('notes', possession, quarterMeta)
-    if (key) localStorage.setItem(key, JSON.stringify(notes))
+    persist('notes', get().quarterMeta, get().notes)
   },
 
   removeNote: (id) => {
     set(s => ({ notes: s.notes.filter(n => n.id !== id) }))
-    const { possession, quarterMeta, notes } = get()
-    const key = fileKey('notes', possession, quarterMeta)
-    if (key) localStorage.setItem(key, JSON.stringify(notes))
+    persist('notes', get().quarterMeta, get().notes)
   },
 
   setAnnotatorName: (name) => {
@@ -436,8 +365,6 @@ export const useStore = create<AppStore>((set, get) => ({
 
   incrementAnnotationTime: (delta) => {
     set(s => ({ annotationSeconds: s.annotationSeconds + delta }))
-    const { possession, quarterMeta, annotationSeconds } = get()
-    const key = fileKey('anntime', possession, quarterMeta)
-    if (key) localStorage.setItem(key, String(annotationSeconds))
+    persist('anntime', get().quarterMeta, get().annotationSeconds)
   },
 }))
