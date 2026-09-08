@@ -5,6 +5,9 @@ A desktop tool for annotating **defensive assignments** in NBA games — who is 
 Built for research use: annotations are keyed back to the source tracking frames, and two annotators' work can be compared to produce an inter-rater reliability figure.
 
 <!-- SCREENSHOT: main annotation view (court + roster + grid) -->
+<p align="center">
+  <img src="guarding_whoop/images/main.png" width="600">
+</p>
 
 ---
 
@@ -73,7 +76,7 @@ Drop in two exported files for the same quarter and get a reliability report plu
 ### Annotating
 
 1. Launch and click **Annotate Quarter**
-2. Load `player_data.csv` (cached after the first time), then drop in the quarter tracking JSON
+2. Load `player_data.csv` (not mandatory, u can also skip this step), then drop in the quarter tracking JSON,
 3. Optionally load a game video for reference
 4. Navigate with the playback bar, the timeline header, or the keyboard
 5. **Assign** by dragging an attacker from the roster onto a defender's cell — or drop onto `∅` for "guarding no one". You can also click a defender then an attacker on the court.
