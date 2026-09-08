@@ -1,13 +1,15 @@
 import { v4 as uuid } from 'uuid'
 import type { CellAnnotation, AttackerId } from '../store/useStore'
 import { QUARTER_BUCKET_S } from '../constants'
+import { parseCSVTable } from './csv'
 
 // Parse a previously exported per-frame annotation CSV (exportFrameCSV) back
 // into CellAnnotation[]. One annotation is kept per (defender, bucket) pair —
 // duplicate frame rows for the same bucket collapse to a single entry.
 export function parseAnnotationCSV(csvText: string): CellAnnotation[] {
-  const lines = csvText.trim().split('\n')
-  const headers = lines[0].split(',').map(h => h.trim())
+  // RFC4180 aware: a player named "Smith, Jr." used to shift every later
+  // column, and CRLF files left a trailing \r on the last one.
+  const { headers, rows } = parseCSVTable(csvText)
 
   const iStatus       = headers.indexOf('gamestatus')
   const iDefenderId   = headers.indexOf('defender_id')
@@ -17,8 +19,7 @@ export function parseAnnotationCSV(csvText: string): CellAnnotation[] {
 
   const seen = new Map<string, CellAnnotation>()
 
-  for (let i = 1; i < lines.length; i++) {
-    const cols = lines[i].split(',')
+  for (const cols of rows) {
     if (cols[iStatus] !== 'active') continue
 
     const defenderId = parseInt(cols[iDefenderId])

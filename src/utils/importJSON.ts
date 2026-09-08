@@ -1,6 +1,7 @@
 import { v4 as uuid } from 'uuid'
 import type { CellAnnotation, AttackerId } from '../store/useStore'
 import { QUARTER_BUCKET_S } from '../constants'
+import { parseAnnotationDocument } from './annotationDocument'
 
 // Parse previously exported annotation JSON back into store shape.
 // Supports three formats:
@@ -18,7 +19,7 @@ export interface ImportedAnnotations {
 export function parseAnnotationJSON(text: string): ImportedAnnotations {
   const data = JSON.parse(text)
 
-  if (Array.isArray(data?.buckets)) return parseV2(data)
+  if (Array.isArray(data?.buckets)) return parseV2(text)
   if (Array.isArray(data?.frames))  return parseV1(data)
   if (Array.isArray(data?.pairs))   return parseLegacyPairs(data)
 
@@ -27,34 +28,27 @@ export function parseAnnotationJSON(text: string): ImportedAnnotations {
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-function parseV2(data: any): ImportedAnnotations {
+// v2 is parsed once, by parseAnnotationDocument, and projected down to the
+// resume-shape here. Parsing the same format in two places is how the two
+// copies drift apart.
+function parseV2(text: string): ImportedAnnotations {
+  const doc = parseAnnotationDocument(text)
   const annotations: CellAnnotation[] = []
   const deadTimeBuckets: number[] = []
   const shotBuckets: number[] = []
   const reboundBuckets: number[] = []
 
-  for (const row of data.buckets) {
-    const bucket = Number(row.bucket)
-    if (isNaN(bucket)) continue
-
-    if (row.status === 'dead') deadTimeBuckets.push(bucket)
-    if (Array.isArray(row.events)) {
-      if (row.events.includes('shot'))    shotBuckets.push(bucket)
-      if (row.events.includes('rebound')) reboundBuckets.push(bucket)
-    }
-
-    if (!Array.isArray(row.assignments)) continue
-    for (const a of row.assignments) {
-      if (a.att === null || a.att === undefined) continue   // unannotated defender
-      const attackerId: AttackerId = a.att === 'NONE' || a.att === 'GUARD_NONE' ? 'GUARD_NONE' : Number(a.att)
-      if (typeof attackerId === 'number' && isNaN(attackerId)) continue
-      const conf = a.conf ?? a.confidence
+  for (const [bucket, b] of doc.buckets) {
+    if (b.status === 'dead') deadTimeBuckets.push(bucket)
+    if (b.shot) shotBuckets.push(bucket)
+    if (b.rebound) reboundBuckets.push(bucket)
+    for (const [defenderId, attackerId] of b.assignments) {
       annotations.push({
         id: uuid(),
-        defenderId: Number(a.def),
+        defenderId,
         attackerId,
         shotClockBucket: bucket,
-        confidence: conf === 1 || conf === 2 || conf === 3 ? conf : undefined,
+        confidence: b.confidence.get(defenderId),
       })
     }
   }
