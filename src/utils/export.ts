@@ -24,12 +24,12 @@ function resolveAttacker(id: AttackerId, playerDict: Record<number, Player>) {
 
 // RFC4180 quoting. Player names legitimately contain commas ("Smith, Jr."),
 // which silently corrupted every downstream parse of the frame CSV.
-function csvEscape(value: unknown): string {
+export function csvEscape(value: unknown): string {
   const str = value === null || value === undefined ? '' : String(value)
   return /[",\n\r]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str
 }
 
-function csvRow(cells: unknown[]): string {
+export function csvRow(cells: unknown[]): string {
   return cells.map(csvEscape).join(',')
 }
 
@@ -328,7 +328,7 @@ export function exportNotesCSV(
 
 // ── Helper ─────────────────────────────────────────────────────────────────
 
-function download(content: string, filename: string, mime: string) {
+export function download(content: string, filename: string, mime: string) {
   const blob = new Blob([content], { type: mime })
   const url  = URL.createObjectURL(blob)
   const a    = document.createElement('a')

@@ -9,6 +9,7 @@ import RosterPanel from './components/RosterPanel'
 import PlaybackControls from './components/PlaybackControls'
 import AnnotationArea from './components/AnnotationArea'
 import SpellTimeline from './components/SpellTimeline'
+import ComparePage from './pages/ComparePage'
 import { useStore } from './store/useStore'
 
 // ── Panel size constants ─────────────────────────────────────────────────────
@@ -25,7 +26,7 @@ const ROSTER_MIN_W = 140
 const ROSTER_MAX_W = 500
 
 export default function App() {
-  const [page, setPage] = useState<'home' | 'quarter-setup' | 'quarter'>('home')
+  const [page, setPage] = useState<'home' | 'quarter-setup' | 'quarter' | 'compare'>('home')
 
   // Cells are how the work is entered; spells are the unit the analysis reads.
   const [bottomView, setBottomView] = useState<'grid' | 'spells'>('grid')
@@ -194,7 +195,11 @@ export default function App() {
   if (page === 'home') {
     return <UploadPage
       onQuarter={() => setPage('quarter-setup')}
+      onCompare={() => setPage('compare')}
     />
+  }
+  if (page === 'compare') {
+    return <ComparePage onBack={() => setPage('home')} />
   }
   if (page === 'quarter-setup') {
     return <QuarterSetupPage onStart={() => setPage('quarter')} onBack={() => setPage('home')} />

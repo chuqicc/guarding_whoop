@@ -16,9 +16,10 @@ function readFile(file: File): Promise<string> {
 
 interface Props {
   onQuarter:    () => void
+  onCompare:    () => void
 }
 
-export default function UploadPage({ onQuarter }: Props) {
+export default function UploadPage({ onQuarter, onCompare }: Props) {
   const loadPlayerDict = useStore(s => s.loadPlayerDict)
   const playerDict     = useStore(s => s.playerDict)
   const theme          = useStore(s => s.theme)
@@ -152,6 +153,15 @@ export default function UploadPage({ onQuarter }: Props) {
           description="Full-quarter defensive annotation on SportVU tracking"
           enabled={true}
           onClick={onQuarter}
+        />
+
+        {/* Mode: compare two annotators of the same quarter */}
+        <ModeButton
+          icon="⚖"
+          label="对比标注者"
+          description="上传两份同一节的标注，计算一致性并逐处查看分歧"
+          enabled={true}
+          onClick={onCompare}
         />
 
       </div>
