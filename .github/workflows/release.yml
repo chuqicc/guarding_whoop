@@ -38,7 +38,7 @@ jobs:
         run: npm version --no-git-tag-version ($env:GITHUB_REF_NAME -replace '^v','')
 
       - name: Build frontend (production)
-        run: npm run build:prod
+        run: npm run build
 
       - name: Package Windows app
         run: npx electron-builder --win --publish never '-c.nsis.artifactName=guardingwhoop-Setup-${version}.${ext}' '-c.portable.artifactName=guardingwhoop-Portable-${version}.${ext}'
@@ -76,7 +76,7 @@ jobs:
         run: npm version --no-git-tag-version "${GITHUB_REF_NAME#v}"
 
       - name: Build frontend (production)
-        run: npm run build:prod
+        run: npm run build
 
       - name: Package macOS app
         run: npx electron-builder --mac --publish never -c.mac.target=dmg '-c.mac.artifactName=guardingwhoop-${version}-arm64.${ext}'

@@ -10,11 +10,11 @@ const ROW_H = 30
 const PX_PER_S = 26
 
 const STATUS_STYLE: Record<CellStatus, { bg: string; fg: string; label: string }> = {
-  agree:               { bg: 'var(--agree-bg, #1f3d2b)',    fg: 'var(--text-3)', label: '一致' },
-  disagree:            { bg: 'var(--accent-danger, #c0504d)', fg: '#fff',        label: '归属分歧' },
-  'coverage-mismatch': { bg: 'var(--confidence-mid, #b8860b)', fg: '#fff',       label: '仅一方标注' },
-  'dead-excluded':     { bg: 'var(--bg-surface)',           fg: 'var(--text-4)', label: '死球（不计入）' },
-  'defense-mismatch':  { bg: '#7b3fa0',                     fg: '#fff',          label: '攻防归属分歧' },
+  agree:               { bg: 'var(--agree-bg, #1f3d2b)',    fg: 'var(--text-3)', label: 'Agree' },
+  disagree:            { bg: 'var(--accent-danger, #c0504d)', fg: '#fff',        label: 'Different attacker' },
+  'coverage-mismatch': { bg: 'var(--confidence-mid, #b8860b)', fg: '#fff',       label: 'Only one annotated' },
+  'dead-excluded':     { bg: 'var(--bg-surface)',           fg: 'var(--text-4)', label: 'Dead ball (excluded)' },
+  'defense-mismatch':  { bg: '#7b3fa0',                     fg: '#fff',          label: 'Defending team differs' },
 }
 
 interface Props {
@@ -49,7 +49,7 @@ export default function DiffGrid({ report, docA, docB, selectedRun, onSelectRun 
   })
 
   if (runs.length === 0) {
-    return <div style={{ padding: 16, color: 'var(--text-4)', fontSize: 13 }}>没有可比对的重叠数据</div>
+    return <div style={{ padding: 16, color: 'var(--text-4)', fontSize: 13 }}>No overlapping data to compare</div>
   }
 
   const firstBucket = orderedBuckets[0] ?? 0
@@ -72,7 +72,7 @@ export default function DiffGrid({ report, docA, docB, selectedRun, onSelectRun 
           </span>
         ))}
         <span style={{ marginLeft: 'auto', color: 'var(--text-4)' }}>
-          n / p 在分歧之间跳转 · 点色带跳到那一刻
+          n / p to step between disagreements · click a bar to jump there
         </span>
       </div>
 
@@ -109,7 +109,7 @@ export default function DiffGrid({ report, docA, docB, selectedRun, onSelectRun 
                       : `A:${nameOf(r.a)} → B:${nameOf(r.b)}`
                     const title =
                       `${st.label} · ${r.durationS.toFixed(1)}s` +
-                      (r.status === 'agree' ? ` · 双方都标 ${nameOf(r.a)}` : ` · ${report.annotatorA || 'A'}:${nameOf(r.a)} / ${report.annotatorB || 'B'}:${nameOf(r.b)}`)
+                      (r.status === 'agree' ? ` · both marked ${nameOf(r.a)}` : ` · ${report.annotatorA || 'A'}:${nameOf(r.a)} / ${report.annotatorB || 'B'}:${nameOf(r.b)}`)
 
                     return (
                       <button

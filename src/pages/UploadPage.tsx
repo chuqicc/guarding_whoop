@@ -158,8 +158,8 @@ export default function UploadPage({ onQuarter, onCompare }: Props) {
         {/* Mode: compare two annotators of the same quarter */}
         <ModeButton
           icon="⚖"
-          label="对比标注者"
-          description="上传两份同一节的标注，计算一致性并逐处查看分歧"
+          label="Compare Annotators"
+          description="Load two annotators' files for the same quarter, score agreement and review every difference"
           enabled={true}
           onClick={onCompare}
         />

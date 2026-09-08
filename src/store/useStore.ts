@@ -74,8 +74,8 @@ interface AppStore {
   // ── Annotation ──
   cellAnnotations: CellAnnotation[]
   deadTimeBuckets: number[]        // bucket keys marked as dead time (no live play)
-  shotBuckets: number[]            // bucket keys marked with a shot attempt (出手)
-  reboundBuckets: number[]         // bucket keys marked with a rebound (篮板)
+  shotBuckets: number[]            // bucket keys marked with a shot attempt
+  reboundBuckets: number[]         // bucket keys marked with a rebound
 
   // ── Auto-fill memory (carry previous bucket's assignments forward) ──
   autoFillMemory: boolean          // toggleable; false = never auto-fill

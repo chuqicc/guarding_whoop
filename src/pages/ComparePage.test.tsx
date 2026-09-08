@@ -72,16 +72,16 @@ describe('ComparePage', () => {
     await drop(0, file(exportJSON({ annotator: 'Alice', quarter: 1, assignments: { '400': { 1: 6 } } })))
     await drop(1, file(exportJSON({ annotator: 'Bob', quarter: 2, assignments: { '400': { 1: 6 } } })))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/不是同一节/)
+    expect(await screen.findByRole('alert')).toHaveTextContent(/different quarters/)
     // and no numbers are shown, because they would be meaningless
-    expect(screen.queryByText('原始一致率')).not.toBeInTheDocument()
+    expect(screen.queryByText('Raw agreement')).not.toBeInTheDocument()
   })
 
   it('refuses to compare two different games', async () => {
     render(<ComparePage onBack={vi.fn()} />)
     await drop(0, file(exportJSON({ annotator: 'Alice', gameId: 'G1', assignments: { '400': { 1: 6 } } })))
     await drop(1, file(exportJSON({ annotator: 'Bob', gameId: 'G2', assignments: { '400': { 1: 6 } } })))
-    expect(await screen.findByRole('alert')).toHaveTextContent(/不是同一场/)
+    expect(await screen.findByRole('alert')).toHaveTextContent(/different games/)
   })
 
   it('reports agreement and shows the exclusion counts on the face of it', async () => {
@@ -95,11 +95,11 @@ describe('ComparePage', () => {
       assignments: { '400': { 1: 6 }, '399.5': { 1: 7 } },
     })))
 
-    expect(await screen.findByText('原始一致率')).toBeInTheDocument()
+    expect(await screen.findByText('Raw agreement')).toBeInTheDocument()
     expect(screen.getByText('50.0%')).toBeInTheDocument()
     // Exclusion counters are always visible, not hidden behind a toggle.
     // (Some labels also appear in the DiffGrid legend, hence getAllByText.)
-    for (const label of ['仅一方标注', '死球排除', '攻防归属分歧']) {
+    for (const label of ['Only one annotated', 'Dead ball', 'Defending team differs']) {
       expect(screen.getAllByText(label).length).toBeGreaterThan(0)
     }
   })
@@ -110,7 +110,7 @@ describe('ComparePage', () => {
     await drop(1, file(exportJSON({ annotator: 'Alice', assignments: { '400': { 1: 6 } } })))
 
     await waitFor(() => {
-      expect(screen.getAllByRole('alert').some(n => /标注者名字相同/.test(n.textContent ?? '')))
+      expect(screen.getAllByRole('alert').some(n => /same annotator/.test(n.textContent ?? '')))
         .toBe(true)
     })
   })
@@ -119,7 +119,7 @@ describe('ComparePage', () => {
     render(<ComparePage onBack={vi.fn()} />)
     await drop(0, file(exportJSON({ annotator: 'Alice', assignments: { '400': { 1: 6 } } })))
     await drop(1, file(exportJSON({ annotator: 'Bob', assignments: { '400': { 1: 6 } } })))
-    expect(await screen.findByText(/指标说明与局限/)).toBeInTheDocument()
+    expect(await screen.findByText(/How to read these numbers/)).toBeInTheDocument()
   })
 
   it('explains an unreadable file instead of failing silently', async () => {
@@ -132,6 +132,6 @@ describe('ComparePage', () => {
     render(<ComparePage onBack={vi.fn()} />)
     await drop(0, file(exportJSON({ annotator: 'Alice', assignments: { '400': { 1: 6 } } })))
     await drop(1, file(exportJSON({ annotator: 'Bob', assignments: { '400': { 1: 7 } } })))
-    expect(await screen.findByText(/未加载追踪数据/)).toBeInTheDocument()
+    expect(await screen.findByText(/no tracking data loaded/)).toBeInTheDocument()
   })
 })

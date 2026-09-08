@@ -29,7 +29,7 @@ export default function ComparePage({ onBack }: { onBack: () => void }) {
       setErr(null)
     } catch (e) {
       setDoc(null)
-      setErr(e instanceof UnsupportedAnnotationFile ? e.message : `读取失败：${String(e)}`)
+      setErr(e instanceof UnsupportedAnnotationFile ? e.message : `Could not read this file: ${String(e)}`)
     }
   }
 
@@ -37,8 +37,8 @@ export default function ComparePage({ onBack }: { onBack: () => void }) {
   // nothing, so it is refused rather than warned about.
   const mismatch = useMemo(() => {
     if (!docA || !docB) return null
-    if (docA.gameId !== docB.gameId) return `两份文件不是同一场比赛（${docA.gameId} vs ${docB.gameId}）`
-    if (docA.quarter !== docB.quarter) return `两份文件不是同一节（Q${docA.quarter} vs Q${docB.quarter}）`
+    if (docA.gameId !== docB.gameId) return `These files are from different games (${docA.gameId} vs ${docB.gameId})`
+    if (docA.quarter !== docB.quarter) return `These files are from different quarters (Q${docA.quarter} vs Q${docB.quarter})`
     return null
   }, [docA, docB])
 
@@ -115,36 +115,37 @@ export default function ComparePage({ onBack }: { onBack: () => void }) {
         display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0,
         padding: '8px 14px', borderBottom: '1px solid var(--border)', background: 'var(--bg-panel)',
       }}>
-        <button onClick={onBack} style={btn()}>← 返回</button>
-        <strong style={{ fontSize: 14 }}>对比标注者</strong>
+        <button onClick={onBack} style={btn()}>← Back</button>
+        <strong style={{ fontSize: 14 }}>Compare Annotators</strong>
         {report && (
           <button onClick={exportReport} style={{ ...btn(), marginLeft: 'auto' }}>
-            ⬇ 导出分歧清单 CSV
+            ⬇ Export disagreements CSV
           </button>
         )}
       </div>
 
       <div style={{ display: 'flex', gap: 12, padding: 12, flexShrink: 0 }}>
-        <DropSide label="标注者 A" doc={docA} error={errA} onFile={f => load('a', f)} />
-        <DropSide label="标注者 B" doc={docB} error={errB} onFile={f => load('b', f)} />
+        <DropSide label="Annotator A" doc={docA} error={errA} onFile={f => load('a', f)} />
+        <DropSide label="Annotator B" doc={docB} error={errB} onFile={f => load('b', f)} />
       </div>
 
       {mismatch && (
         <div role="alert" style={banner('var(--accent-danger)')}>
-          ⚠ {mismatch} —— 拒绝比对，否则算出的数字没有意义。
+          ⚠ {mismatch} — refusing to compare, because the resulting figures would be meaningless.
         </div>
       )}
 
       {report && report.annotatorA && report.annotatorA === report.annotatorB && (
         <div role="alert" style={banner('var(--confidence-mid)')}>
-          ⚠ 两份文件的标注者名字相同（{report.annotatorA}），无法区分 A/B。请确认没有传错文件。
+          ⚠ Both files name the same annotator ({report.annotatorA}), so the two sides cannot be told apart. Check you did not load the same file twice.
         </div>
       )}
 
       {report && report.nDefenseMismatch > 0 && (
         <div role="alert" style={banner('#7b3fa0')}>
-          ⚠ 有 {report.defenseMismatchBuckets.length} 个 bucket 两人对「谁在防守」判断不同
-          （{report.nDefenseMismatch} 个单元格已排除）。这是整回合级别的分歧，不是单元格级别的。
+          ⚠ The two annotators disagree about which team was defending in{' '}
+          {report.defenseMismatchBuckets.length} bucket(s), excluding {report.nDefenseMismatch} cell(s).
+          This is a possession-level disagreement, not a cell-level one.
         </div>
       )}
 
@@ -153,38 +154,38 @@ export default function ComparePage({ onBack }: { onBack: () => void }) {
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', padding: '0 12px 10px' }}>
             <Card
               value={`${(report.rawAgreement * 100).toFixed(1)}%`}
-              label="原始一致率"
+              label="Raw agreement"
               sub={`n = ${report.nCompared}`}
             />
             <Card
               value={report.kappaPooled === null ? '—' : report.kappaPooled.toFixed(3)}
-              label="Cohen's κ（合并）"
-              sub={report.kappaPooled === null ? '只用了一个类别，κ 无定义' : `按防守者平均 ${report.kappaMeanPerDefender?.toFixed(3) ?? '—'}`}
+              label="Cohen's κ (pooled)"
+              sub={report.kappaPooled === null ? 'Only one category used — κ is undefined' : `mean per defender ${report.kappaMeanPerDefender?.toFixed(3) ?? '—'}`}
             />
             <Card
               value={report.switchEvents.f1.toFixed(3)}
-              label="换防事件 F1"
-              sub={`±${report.switchEvents.toleranceBuckets} bucket · A ${report.switchEvents.nA} / B ${report.switchEvents.nB} · 匹配 ${report.switchEvents.matched}`}
+              label="Switch-event F1"
+              sub={`±${report.switchEvents.toleranceBuckets} bucket · A ${report.switchEvents.nA} / B ${report.switchEvents.nB} · matched ${report.switchEvents.matched}`}
             />
             <Card
               value={`${(report.deadLive.agreement * 100).toFixed(1)}%`}
-              label="死球判定一致率"
+              label="Dead-ball agreement"
               sub={`n = ${report.deadLive.nCompared}`}
             />
-            <Card value={String(report.nCoverageMismatch)} label="仅一方标注" sub="不计入 κ" muted />
-            <Card value={String(report.nDeadExcluded)} label="死球排除" sub="不计入归属统计" muted />
-            <Card value={String(report.nDefenseMismatch)} label="攻防归属分歧" sub="已排除" muted />
+            <Card value={String(report.nCoverageMismatch)} label="Only one annotated" sub="excluded from κ" muted />
+            <Card value={String(report.nDeadExcluded)} label="Dead ball" sub="excluded from assignments" muted />
+            <Card value={String(report.nDefenseMismatch)} label="Defending team differs" sub="excluded" muted />
           </div>
 
           <details style={{ padding: '0 12px 10px', fontSize: 12, color: 'var(--text-3)' }}>
             <summary style={{ cursor: 'pointer' }}>
-              指标说明与局限（{report.caveats.length} 条 · 写论文前请先读）
+              How to read these numbers ({report.caveats.length} caveats · read before quoting them)
             </summary>
             <ul style={{ margin: '8px 0 0 18px', lineHeight: 1.6 }}>
               {report.caveats.map((c, i) => <li key={i}>{c}</li>)}
             </ul>
             <div style={{ marginTop: 8 }}>
-              <strong>边缘分布</strong>（用来判断机会一致有多大）：
+              <strong>Marginals</strong> (so you can see how much room chance had):
               {report.marginals.map(m => (
                 <span key={m.category} style={{ marginLeft: 8 }}>
                   {m.category}: A {m.aCount} / B {m.bCount}
@@ -197,15 +198,15 @@ export default function ComparePage({ onBack }: { onBack: () => void }) {
             display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
             padding: '6px 12px', borderTop: '1px solid var(--border)', fontSize: 12,
           }}>
-            <button onClick={() => step(-1)} style={btn()}>← p 上一处</button>
-            <button onClick={() => step(1)} style={btn()}>n 下一处 →</button>
+            <button onClick={() => step(-1)} style={btn()}>← p Previous</button>
+            <button onClick={() => step(1)} style={btn()}>n Next →</button>
             <span style={{ color: 'var(--text-3)' }}>
-              共 {reviewable.length} 处待讨论
-              {selected && ` 当前：#${docA?.players[selected.defenderId]?.jersey ?? selected.defenderId} ${selected.startBucket.toFixed(1)}`}
+              {reviewable.length} to review
+              {selected && ` · at #${docA?.players[selected.defenderId]?.jersey ?? selected.defenderId}, clock ${selected.startBucket.toFixed(1)}`}
             </span>
             {!framesLoaded && (
               <span style={{ color: 'var(--text-4)', marginLeft: 'auto' }}>
-                （未加载追踪数据，点击色带无法跳转回放）
+                (no tracking data loaded — clicking a bar cannot jump to playback)
               </span>
             )}
           </div>
@@ -246,7 +247,7 @@ function DropSide({ label, doc, error, onFile }: {
       <div style={{ fontSize: 11, color: 'var(--text-4)', marginBottom: 4 }}>{label}</div>
       {doc ? (
         <div style={{ fontSize: 12 }}>
-          <strong style={{ fontSize: 14 }}>{doc.annotator || '（未填写标注者姓名）'}</strong>
+          <strong style={{ fontSize: 14 }}>{doc.annotator || '(no annotator name in file)'}</strong>
           <div style={{ color: 'var(--text-3)', marginTop: 2 }}>
             {doc.gameId} · Q{doc.quarter} · {doc.buckets.size} buckets ·{' '}
             <span style={{ textTransform: 'uppercase' }}>{doc.sourceFormat}</span>
@@ -254,7 +255,7 @@ function DropSide({ label, doc, error, onFile }: {
         </div>
       ) : (
         <div style={{ fontSize: 12, color: error ? 'var(--accent-danger)' : 'var(--text-3)' }}>
-          {error ?? '把导出的 JSON 或 CSV 拖到这里'}
+          {error ?? 'Drop an exported JSON or CSV here'}
         </div>
       )}
       <input
