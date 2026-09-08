@@ -11,6 +11,9 @@ node_modules
 dist
 dist-ssr
 *.local
+.claude
+.github
+
 
 # Editor directories and files
 .vscode/*
@@ -28,3 +31,4 @@ dist_electron
 
 # folder
 /public
+
