@@ -1,50 +1,43 @@
 import { v4 as uuid } from 'uuid'
-import type { CellAnnotation, AttackerId } from '../store/useStore'
-import { QUARTER_BUCKET_S } from '../constants'
-import { parseCSVTable } from './csv'
+import type { CellAnnotation } from '../store/useStore'
+import type { ImportedAnnotations } from './importJSON'
+import { parseAnnotationDocument } from './annotationDocument'
 
-// Parse a previously exported per-frame annotation CSV (exportFrameCSV) back
-// into CellAnnotation[]. One annotation is kept per (defender, bucket) pair —
-// duplicate frame rows for the same bucket collapse to a single entry.
-export function parseAnnotationCSV(csvText: string): CellAnnotation[] {
-  // RFC4180 aware: a player named "Smith, Jr." used to shift every later
-  // column, and CRLF files left a trailing \r on the last one.
-  const { headers, rows } = parseCSVTable(csvText)
+/**
+ * Parse a previously exported per-frame annotation CSV back into store shape.
+ *
+ * This used to return assignments only, so importing a CSV silently dropped the
+ * Dead / Shot / Rebound marks even though every one of those columns is present
+ * in the file — the JSON path restored them and the CSV path did not. Both now
+ * go through parseAnnotationDocument, which is the one place that understands
+ * either export format, so the two paths cannot drift apart again.
+ *
+ * One annotation is kept per (defender, bucket); duplicate frame rows for the
+ * same bucket collapse to a single entry.
+ */
+export function parseAnnotationCSV(csvText: string): ImportedAnnotations {
+  const doc = parseAnnotationDocument(csvText)
 
-  const iStatus       = headers.indexOf('gamestatus')
-  const iDefenderId   = headers.indexOf('defender_id')
-  const iAttackerId   = headers.indexOf('attacker_id')
-  const iQuarterClock = headers.indexOf('quarter_clock')
-  const iConfidence   = headers.indexOf('confidence')
+  const annotations: CellAnnotation[] = []
+  const deadTimeBuckets: number[] = []
+  const shotBuckets: number[] = []
+  const reboundBuckets: number[] = []
 
-  const seen = new Map<string, CellAnnotation>()
+  for (const [bucket, b] of doc.buckets) {
+    if (b.status === 'dead') deadTimeBuckets.push(bucket)
+    if (b.shot) shotBuckets.push(bucket)
+    if (b.rebound) reboundBuckets.push(bucket)
 
-  for (const cols of rows) {
-    if (cols[iStatus] !== 'active') continue
-
-    const defenderId = parseInt(cols[iDefenderId])
-    if (isNaN(defenderId)) continue
-
-    const attRaw = cols[iAttackerId]
-    if (!attRaw) continue
-    const attackerId: AttackerId = attRaw === 'GUARD_NONE' ? 'GUARD_NONE' : parseInt(attRaw)
-    if (typeof attackerId === 'number' && isNaN(attackerId)) continue
-
-    const qc = parseFloat(cols[iQuarterClock])
-    if (isNaN(qc)) continue
-    const bucket = Math.round(Math.floor(qc / QUARTER_BUCKET_S) * QUARTER_BUCKET_S * 1e6) / 1e6
-
-    let confidence: 1 | 2 | 3 | undefined
-    if (iConfidence !== -1) {
-      const c = parseInt(cols[iConfidence])
-      if (c === 1 || c === 2 || c === 3) confidence = c
-    }
-
-    const key = `${defenderId}_${bucket}`
-    if (!seen.has(key)) {
-      seen.set(key, { id: uuid(), defenderId, attackerId, shotClockBucket: bucket, confidence })
+    for (const [defenderId, attackerId] of b.assignments) {
+      annotations.push({
+        id: uuid(),
+        defenderId,
+        attackerId,
+        shotClockBucket: bucket,
+        confidence: b.confidence.get(defenderId),
+      })
     }
   }
 
-  return Array.from(seen.values())
+  return { annotations, deadTimeBuckets, shotBuckets, reboundBuckets }
 }

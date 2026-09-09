@@ -27,7 +27,6 @@ export default function TopBar({ onNewSession }: Props) {
   const cellAnnotations    = useStore(s => s.cellAnnotations)
   const deadTimeBuckets    = useStore(s => s.deadTimeBuckets)
   const playerDict         = useStore(s => s.playerDict)
-  const setCellAnnotations = useStore(s => s.setCellAnnotations)
   const loadQuarter        = useStore(s => s.loadQuarter)
   const annotatorName      = useStore(s => s.annotatorName)
   const setAnnotatorName   = useStore(s => s.setAnnotatorName)
@@ -111,8 +110,8 @@ export default function TopBar({ onNewSession }: Props) {
 
   const handleImportCSV = async (file: File) => {
     try {
-      const anns = parseAnnotationCSV(await readFile(file))
-      setCellAnnotations(anns)
+      // Same restore path as JSON, so Dead / Shot / Rebound come back too.
+      restoreImported(parseAnnotationCSV(await readFile(file)))
       setError(null)
     } catch (e) { setError(`Import failed: ${e}`) }
   }
