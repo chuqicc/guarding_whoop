@@ -6,7 +6,7 @@ Built for research use: annotations are keyed back to the source tracking frames
 
 <!-- SCREENSHOT: main annotation view (court + roster + grid) -->
 <p align="center">
-  <img src="guarding_whoop/images/main.png" width="600">
+  <img src="images/main.png" width="600">
 </p>
 
 ---
@@ -102,7 +102,7 @@ Files from different games or quarters are refused rather than compared — thos
 | Key | Action |
 |---|---|
 | `Space` | Play / pause the tracking animation |
-| `←` `→` | Step 1 second (25 frames) |
+| `←` `→` | Step one annotation column (one 0.5s bucket) |
 | `1` `2` `3` | Set confidence on the focused cell |
 | `Esc` | Clear the focused cell / court selection |
 | `Ctrl`/`Cmd` + `Z` | Undo |

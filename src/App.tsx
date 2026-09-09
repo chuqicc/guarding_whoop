@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { stepBucket } from './utils/frameNav'
 import { isEditableTarget } from './utils/isEditableTarget'
 import UploadPage from './pages/UploadPage'
 import QuarterSetupPage from './pages/QuarterSetupPage'
@@ -115,15 +116,16 @@ export default function App() {
         const { isPlaying, setPlaying } = useStore.getState()
         setPlaying(!isPlaying)
       }
-      if (e.code === 'ArrowRight') {
-        useStore.getState().setCurrentFrame(
-          Math.min(useStore.getState().currentFrame + 25, framesLenRef.current - 1)
-        )
-      }
-      if (e.code === 'ArrowLeft') {
-        useStore.getState().setCurrentFrame(
-          Math.max(useStore.getState().currentFrame - 25, 0)
-        )
+      // One press = one annotation column. Stepping a fixed frame count
+      // drifts off the grid, because a 0.5s bucket is 12–13 frames at 25fps
+      // and real tracking data is unevenly spaced.
+      if (e.code === 'ArrowRight' || e.code === 'ArrowLeft') {
+        e.preventDefault()
+        const { frames, currentFrame, setCurrentFrame, setPlaying } = useStore.getState()
+        // Otherwise the animation loop overwrites the step on the next tick,
+        // the same reason the ±1f buttons pause.
+        setPlaying(false)
+        setCurrentFrame(stepBucket(frames, currentFrame, e.code === 'ArrowRight' ? 1 : -1))
       }
     }
     window.addEventListener('keydown', onKey)
