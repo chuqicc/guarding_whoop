@@ -159,4 +159,4 @@ Releases are cut by pushing a `v*` tag, which builds and attaches the Windows an
 
 - Annotation data is autosaved in browser local storage, keyed per source file. A **SAVE FAILED** indicator appears if storage is full — export immediately if you see it.
 - Set your **annotator name** in the top bar. It is written into every export and is what the comparison view uses to label the two sides.
-- Video sync supports multiple sync points to handle gaps in the tracking data.
+- The video and the tracking animation play as two independent channels. **▶ Both** starts them together, but nothing keeps them aligned afterwards — position the video by hand using the on-screen game clock.

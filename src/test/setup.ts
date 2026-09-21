@@ -17,3 +17,13 @@ if (typeof globalThis.localStorage === 'undefined') {
     get length() { return mem.size },
   } as Storage
 }
+
+// jsdom has no ResizeObserver; components that size themselves to their
+// container (CourtCanvas) construct one on mount.
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as unknown as typeof ResizeObserver
+}

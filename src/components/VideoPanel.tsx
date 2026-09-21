@@ -9,11 +9,31 @@ function fmtTime(s: number) {
   return `${m}:${String(sec).padStart(2, '0')}`
 }
 
-export default function VideoPanel() {
+interface Props {
+  /**
+   * Show a video the caller owns rather than the annotate session's.
+   *
+   * `setVideoUrl` revokes the previous blob URL, so letting the compare flow
+   * write into the store would silently kill the video the annotator had open.
+   */
+  src?: string | null
+  onPickFile?: (file: File) => void
+}
+
+export default function VideoPanel({ src, onPickFile }: Props = {}) {
   const videoRef = useRef<HTMLVideoElement>(null)
 
-  const videoUrl        = useStore(s => s.videoUrl)
-  const setVideoUrl     = useStore(s => s.setVideoUrl)
+  const videoUrlStore   = useStore(s => s.videoUrl)
+  const setVideoUrlStore = useStore(s => s.setVideoUrl)
+
+  // A caller-supplied source takes over both reading and writing, so the two
+  // flows never share a blob URL.
+  const controlled = src !== undefined
+  const videoUrl = controlled ? src : videoUrlStore
+  const setVideoUrl = (url: string | null) => {
+    if (controlled) return
+    setVideoUrlStore(url)
+  }
   const isVideoPlaying  = useStore(s => s.isVideoPlaying)
   const setVideoPlaying = useStore(s => s.setVideoPlaying)
   const playbackSpeed   = useStore(s => s.playbackSpeed)
@@ -59,6 +79,9 @@ export default function VideoPanel() {
   // ── File loading ──────────────────────────────────────────────────────────
   const loadFile = (file: File) => {
     if (!file.type.startsWith('video/')) return
+    // When controlled, the owner decides what to do with the file — it holds
+    // the blob URL and is responsible for revoking it.
+    if (controlled) { onPickFile?.(file); setVideoPlaying(false); return }
     setVideoUrl(URL.createObjectURL(file))
     setVideoPlaying(false)
     setVidTime(0); setVidDuration(0)

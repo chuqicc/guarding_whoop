@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Stage, Layer, Image as KonvaImage, Circle, Text, Arrow, Group } from 'react-konva'
 import { useStore } from '../store/useStore'
+import type { TrackingFrame, Player, QuarterMeta } from '../store/useStore'
 import { COURT_W, COURT_H, COLOR_TEAM_A, COLOR_TEAM_B, COLOR_BALL, QUARTER_BUCKET_S } from '../constants'
 import { toggleBtnStyle } from '../utils/buttonStyle'
 import courtPng from '../assets/court.png'
@@ -31,7 +32,38 @@ function scaleFt(feet: number, stageW: number) {
   return (feet / COURT_W) * stageW
 }
 
-export default function CourtCanvas() {
+interface Props {
+  /**
+   * Render without any way to write annotations.
+   *
+   * This is a data-safety requirement, not a cosmetic one: the localStorage key
+   * is derived from `quarterMeta.filename` (useStore `fileKey`/`persist`), so on
+   * a page that merely borrows a loaded quarter, one stray click would write
+   * into the real annotator's saved file.
+   */
+  readOnly?: boolean
+  /**
+   * Render tracking data that is NOT in the shared store.
+   *
+   * The compare flow loads its own quarter, and it must not go through
+   * `loadQuarter`: that clears `cellAnnotations` and resets the undo history,
+   * so an annotator with work open would find it wiped, and the next edit
+   * would persist the emptied set over their saved file. Passing the frames in
+   * keeps the comparison entirely out of the annotation session.
+   */
+  frames?: TrackingFrame[]
+  currentFrame?: number
+  playerDict?: Record<number, Player>
+  quarterMeta?: QuarterMeta | null
+}
+
+export default function CourtCanvas({
+  readOnly = false,
+  frames: framesProp,
+  currentFrame: currentFrameProp,
+  playerDict: playerDictProp,
+  quarterMeta: quarterMetaProp,
+}: Props = {}) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerSize, setContainerSize] = useState({ w: 600, h: 288 })
   const [courtImg, setCourtImg] = useState<HTMLImageElement | null>(null)
@@ -40,17 +72,24 @@ export default function CourtCanvas() {
   const [selectedDefId, setSelectedDefId] = useState<number | null>(null)
   const [hoveredId,     setHoveredId]     = useState<number | null>(null)
 
-  const frames             = useStore(s => s.frames)
-  const currentFrame       = useStore(s => s.currentFrame)
+  const framesStore        = useStore(s => s.frames)
+  const currentFrameStore  = useStore(s => s.currentFrame)
   const cellAnnotations    = useStore(s => s.cellAnnotations)
-  const playerDict         = useStore(s => s.playerDict)
+  const playerDictStore    = useStore(s => s.playerDict)
   const flipX              = useStore(s => s.flipX)
   const flipY              = useStore(s => s.flipY)
   const toggleFlipX        = useStore(s => s.toggleFlipX)
   const toggleFlipY        = useStore(s => s.toggleFlipY)
-  const quarterMeta        = useStore(s => s.quarterMeta)
+  const quarterMetaStore   = useStore(s => s.quarterMeta)
   const theme              = useStore(s => s.theme)
   const setCellAnnotation       = useStore(s => s.setCellAnnotation)
+
+  // Props win when given, so the compare flow can render its own quarter
+  // without any of it reaching the annotation session.
+  const frames       = framesProp       ?? framesStore
+  const currentFrame = currentFrameProp ?? currentFrameStore
+  const playerDict   = playerDictProp   ?? playerDictStore
+  const quarterMeta  = quarterMetaProp !== undefined ? quarterMetaProp : quarterMetaStore
 
   // Canvas strokes can't resolve CSS variables — mirror the index.css tokens per theme
   const selectionRingColor = theme === 'light' ? '#1a1d2a' : '#ffffff'
@@ -89,7 +128,7 @@ export default function CourtCanvas() {
     ? Math.floor(frame.quarterClock / QUARTER_BUCKET_S) * QUARTER_BUCKET_S
     : null
 
-  const activePairs = currentBucket !== null
+  const activePairs = currentBucket !== null && !readOnly
     ? cellAnnotations.filter(c => c.shotClockBucket === currentBucket)
     : []
 
@@ -107,6 +146,7 @@ export default function CourtCanvas() {
 
   // ── Click handlers ─────────────────────────────────────────────────────────
   const handleClick = (playerId: number, playerTeamId: number) => {
+    if (readOnly) return
     if (currentBucket === null) return
     const defending = isDefenderFn(playerTeamId)
     if (defending) {
@@ -120,6 +160,7 @@ export default function CourtCanvas() {
   }
 
   const handleDblClick = (playerId: number, playerTeamId: number) => {
+    if (readOnly) return
     if (currentBucket === null) return
     if (!isDefenderFn(playerTeamId)) return
     // Double-click defender → GUARD_NONE
@@ -151,7 +192,7 @@ export default function CourtCanvas() {
       style={{ flex: 1, minHeight: 0, overflow: 'hidden', position: 'relative', background: 'var(--bg-cell)' }}
     >
       {/* Selection hint */}
-      {selectedDefId !== null && (
+      {!readOnly && selectedDefId !== null && (
         <div style={{
           position: 'absolute', bottom: offsetY + 6, left: offsetX + 8,
           zIndex: 20, fontSize: 11, color: '#fff',
@@ -219,7 +260,7 @@ export default function CourtCanvas() {
             })}
 
             {/* Preview arrow: selected defender → hovered attacker */}
-            {selectedDefId !== null && hoveredIsAttacker && hoveredId !== null &&
+            {!readOnly && selectedDefId !== null && hoveredIsAttacker && hoveredId !== null &&
               playerPos[selectedDefId] && playerPos[hoveredId] && (
               <Arrow
                 points={[

@@ -2,12 +2,8 @@ import { useMemo } from 'react'
 import type { AgreementReport, CellStatus } from '../utils/agreement'
 import type { AnnotationDocument } from '../utils/annotationDocument'
 import type { AttackerId } from '../store/useStore'
-import { QUARTER_BUCKET_S } from '../constants'
 import { buildDiffRuns, isReviewable, type DiffRun } from '../utils/diffRuns'
-
-const LABEL_W = 170
-const ROW_H = 30
-const PX_PER_S = 26
+import { makeScale, LABEL_W, ROW_H, type TimelineScale } from '../utils/timelineScale'
 
 const STATUS_STYLE: Record<CellStatus, { bg: string; fg: string; label: string }> = {
   agree:               { bg: 'var(--agree-bg, #1f3d2b)',    fg: 'var(--text-3)', label: 'Agree' },
@@ -23,9 +19,11 @@ interface Props {
   docB: AnnotationDocument
   selectedRun?: DiffRun | null
   onSelectRun?: (run: DiffRun) => void
+  /** Shared horizontal scale — see the note on DeadBallStrip. */
+  scale?: TimelineScale
 }
 
-export default function DiffGrid({ report, docA, docB, selectedRun, onSelectRun }: Props) {
+export default function DiffGrid({ report, docA, docB, selectedRun, onSelectRun, scale: sharedScale }: Props) {
   const orderedBuckets = useMemo(
     () => [...new Set([...docA.buckets.keys(), ...docB.buckets.keys()])].sort((x, y) => y - x),
     [docA, docB],
@@ -52,9 +50,8 @@ export default function DiffGrid({ report, docA, docB, selectedRun, onSelectRun 
     return <div style={{ padding: 16, color: 'var(--text-4)', fontSize: 13 }}>No overlapping data to compare</div>
   }
 
-  const firstBucket = orderedBuckets[0] ?? 0
-  const xOf = (bucket: number) => (firstBucket - bucket) * PX_PER_S
-  const totalW = Math.max(240, orderedBuckets.length * QUARTER_BUCKET_S * PX_PER_S)
+  // Shared with the dead-ball lanes above, so columns line up.
+  const { xOf, widthOf, totalW } = sharedScale ?? makeScale(orderedBuckets)
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg-panel)' }}>
@@ -100,16 +97,26 @@ export default function DiffGrid({ report, docA, docB, selectedRun, onSelectRun 
                 <div style={{ position: 'relative', flex: 1, height: '100%' }}>
                   {runs.filter(r => r.defenderId === defId).map(r => {
                     const st = STATUS_STYLE[r.status]
-                    const width = Math.max(4, r.durationS * PX_PER_S - 1)
+                    const width = Math.max(4, widthOf(r.durationS) - 1)
                     const selected = selectedRun
                       && selectedRun.defenderId === r.defenderId
                       && selectedRun.startBucket === r.startBucket
-                    const detail = r.status === 'agree'
-                      ? `${nameOf(r.a)}`
-                      : `A:${nameOf(r.a)} → B:${nameOf(r.b)}`
+                    // Dead ball is a property of the bucket, not of the two
+                    // annotators' attacker choices — quoting A:#7 / B:#7 on it
+                    // described a disagreement that is not what the bar means.
+                    const isAttackerLevel = r.status !== 'dead-excluded'
+                    const detail = !isAttackerLevel
+                      ? ''
+                      : r.status === 'agree'
+                        ? `${nameOf(r.a)}`
+                        : `A:${nameOf(r.a)} → B:${nameOf(r.b)}`
                     const title =
                       `${st.label} · ${r.durationS.toFixed(1)}s` +
-                      (r.status === 'agree' ? ` · both marked ${nameOf(r.a)}` : ` · ${report.annotatorA || 'A'}:${nameOf(r.a)} / ${report.annotatorB || 'B'}:${nameOf(r.b)}`)
+                      (!isAttackerLevel
+                        ? ' · assignments not scored here; see the dead-ball lanes above'
+                        : r.status === 'agree'
+                          ? ` · both marked ${nameOf(r.a)}`
+                          : ` · ${report.annotatorA || 'A'}:${nameOf(r.a)} / ${report.annotatorB || 'B'}:${nameOf(r.b)}`)
 
                     return (
                       <button

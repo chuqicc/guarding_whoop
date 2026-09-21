@@ -45,6 +45,12 @@
   --mode-off-bg:    #2a3a5a;
 
   /* Confidence indicators */
+  /* Annotator identity in the dead-ball lanes. Validated as a categorical
+     pair against this surface: normal ΔE 16.9, deutan 16.2. The pink sits
+     above the equal-weight lightness band deliberately — at equal lightness
+     red and pink only reach ΔE ~11, which is below the legibility floor. */
+  --annot-a: #e05c5c;
+  --annot-b: #ff8fc7;
   --confidence-low: #e05c5c;
   --confidence-mid: #d9a23c;
 
@@ -106,6 +112,9 @@
   --mode-off-bg:    #cfe0f5;
 
   /* Confidence indicators */
+  /* Light-theme pair: ALL CHECKS PASS (normal ΔE 15.0). */
+  --annot-a: #d14b4b;
+  --annot-b: #f06fae;
   --confidence-low: #d14b4b;
   --confidence-mid: #c08a2c;
 

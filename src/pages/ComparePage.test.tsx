@@ -1,7 +1,24 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useState } from 'react'
 import ComparePage from './ComparePage'
+import type { AnnotationDocument } from '../utils/annotationDocument'
+
+/** The page's documents are controlled by App; this holds them for the tests. */
+function Harness(props: { onReviewDeadBalls?: () => void } = {}) {
+  const [docA, setDocA] = useState<AnnotationDocument | null>(null)
+  const [docB, setDocB] = useState<AnnotationDocument | null>(null)
+  return (
+    <ComparePage
+      onBack={() => {}}
+      docA={docA} docB={docB} setDocA={setDocA} setDocB={setDocB}
+      tracking={null} setTracking={() => {}}
+      videoUrl={null} setVideoFile={() => {}}
+      onReviewDeadBalls={props.onReviewDeadBalls ?? (() => {})}
+    />
+  )
+}
 import { useStore } from '../store/useStore'
 
 // A minimal v2 export, built inline so the test states exactly what it feeds in.
@@ -53,22 +70,25 @@ beforeEach(() => {
 })
 
 describe('ComparePage', () => {
-  it('accepts both JSON and CSV', () => {
-    render(<ComparePage onBack={vi.fn()} />)
-    for (const input of document.querySelectorAll('input[type="file"]')) {
-      expect(input.getAttribute('accept')).toBe('.json,.csv')
-    }
+  it('accepts both JSON and CSV for the annotator files', () => {
+    render(<Harness />)
+    const accepts = [...document.querySelectorAll('input[type="file"]')]
+      .map(i => i.getAttribute('accept'))
+    // Two annotator slots, plus the tracking JSON and the optional video.
+    expect(accepts.filter(a => a === '.json,.csv')).toHaveLength(2)
+    expect(accepts).toContain('.json')      // quarter tracking
+    expect(accepts).toContain('video/*')    // footage
   })
 
   it('shows who each side is once a file is loaded', async () => {
-    render(<ComparePage onBack={vi.fn()} />)
+    render(<Harness />)
     await drop(0, file(exportJSON({ annotator: 'Alice', assignments: { '400': { 1: 6 } } })))
     expect(await screen.findByText('Alice')).toBeInTheDocument()
     expect(screen.getByText(/G1 · Q1/)).toBeInTheDocument()
   })
 
   it('refuses to compare two different quarters', async () => {
-    render(<ComparePage onBack={vi.fn()} />)
+    render(<Harness />)
     await drop(0, file(exportJSON({ annotator: 'Alice', quarter: 1, assignments: { '400': { 1: 6 } } })))
     await drop(1, file(exportJSON({ annotator: 'Bob', quarter: 2, assignments: { '400': { 1: 6 } } })))
 
@@ -78,14 +98,14 @@ describe('ComparePage', () => {
   })
 
   it('refuses to compare two different games', async () => {
-    render(<ComparePage onBack={vi.fn()} />)
+    render(<Harness />)
     await drop(0, file(exportJSON({ annotator: 'Alice', gameId: 'G1', assignments: { '400': { 1: 6 } } })))
     await drop(1, file(exportJSON({ annotator: 'Bob', gameId: 'G2', assignments: { '400': { 1: 6 } } })))
     expect(await screen.findByRole('alert')).toHaveTextContent(/different games/)
   })
 
   it('reports agreement and shows the exclusion counts on the face of it', async () => {
-    render(<ComparePage onBack={vi.fn()} />)
+    render(<Harness />)
     await drop(0, file(exportJSON({
       annotator: 'Alice',
       assignments: { '400': { 1: 6 }, '399.5': { 1: 6 } },
@@ -105,7 +125,7 @@ describe('ComparePage', () => {
   })
 
   it('warns when both files carry the same annotator name', async () => {
-    render(<ComparePage onBack={vi.fn()} />)
+    render(<Harness />)
     await drop(0, file(exportJSON({ annotator: 'Alice', assignments: { '400': { 1: 6 } } })))
     await drop(1, file(exportJSON({ annotator: 'Alice', assignments: { '400': { 1: 6 } } })))
 
@@ -116,20 +136,20 @@ describe('ComparePage', () => {
   })
 
   it('surfaces the caveats rather than showing a bare number', async () => {
-    render(<ComparePage onBack={vi.fn()} />)
+    render(<Harness />)
     await drop(0, file(exportJSON({ annotator: 'Alice', assignments: { '400': { 1: 6 } } })))
     await drop(1, file(exportJSON({ annotator: 'Bob', assignments: { '400': { 1: 6 } } })))
     expect(await screen.findByText(/How to read these numbers/)).toBeInTheDocument()
   })
 
   it('explains an unreadable file instead of failing silently', async () => {
-    render(<ComparePage onBack={vi.fn()} />)
+    render(<Harness />)
     await drop(0, file(JSON.stringify({ pairs: [] }), 'legacy.json'))
     expect(await screen.findByText(/Re-export/i)).toBeInTheDocument()
   })
 
   it('says jumping to playback is unavailable without tracking data loaded', async () => {
-    render(<ComparePage onBack={vi.fn()} />)
+    render(<Harness />)
     await drop(0, file(exportJSON({ annotator: 'Alice', assignments: { '400': { 1: 6 } } })))
     await drop(1, file(exportJSON({ annotator: 'Bob', assignments: { '400': { 1: 7 } } })))
     expect(await screen.findByText(/no tracking data loaded/)).toBeInTheDocument()

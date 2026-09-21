@@ -5,14 +5,35 @@ import { csvRow, download } from '../utils/export'
 import { useStore } from '../store/useStore'
 import { isEditableTarget } from '../utils/isEditableTarget'
 import DiffGrid from '../components/DiffGrid'
+import DeadBallStrip from '../components/DeadBallStrip'
+import AnnotationDropZone from '../components/AnnotationDropZone'
+import TrackingDropZone, { type LoadedTracking } from '../components/TrackingDropZone'
+import { parseQuarterJSON } from '../utils/parseQuarterJSON'
 import { buildDiffRuns, isReviewable, type DiffRun } from '../utils/diffRuns'
+import { makeScale } from '../utils/timelineScale'
 import type { AttackerId } from '../store/useStore'
 
 type Side = 'a' | 'b'
 
-export default function ComparePage({ onBack }: { onBack: () => void }) {
-  const [docA, setDocA] = useState<AnnotationDocument | null>(null)
-  const [docB, setDocB] = useState<AnnotationDocument | null>(null)
+interface Props {
+  onBack: () => void
+  /** Lifted to App so the review page can reuse them without re-dropping files. */
+  docA: AnnotationDocument | null
+  docB: AnnotationDocument | null
+  setDocA: (d: AnnotationDocument | null) => void
+  setDocB: (d: AnnotationDocument | null) => void
+  tracking: LoadedTracking | null
+  setTracking: (t: LoadedTracking | null) => void
+  videoUrl: string | null
+  setVideoFile: (f: File | null) => void
+  onReviewDeadBalls: () => void
+}
+
+export default function ComparePage({
+  onBack, docA, docB, setDocA, setDocB,
+  tracking, setTracking, videoUrl, setVideoFile, onReviewDeadBalls,
+}: Props) {
+  const [errTracking, setErrTracking] = useState<string | null>(null)
   const [errA, setErrA] = useState<string | null>(null)
   const [errB, setErrB] = useState<string | null>(null)
   const [selected, setSelected] = useState<DiffRun | null>(null)
@@ -33,6 +54,30 @@ export default function ComparePage({ onBack }: { onBack: () => void }) {
     }
   }
 
+  const loadTracking = async (file: File) => {
+    try {
+      // parseQuarterJSON is pure. Deliberately NOT the store's loadQuarter,
+      // which clears cellAnnotations and resets undo — that would wipe the
+      // work of whoever has a quarter open on the annotate page.
+      const parsed = parseQuarterJSON(await file.text(), file.name)
+      setTracking({ filename: file.name, ...parsed })
+      setErrTracking(null)
+    } catch (e) {
+      setTracking(null)
+      setErrTracking(`Could not read this tracking file: ${String(e)}`)
+    }
+  }
+
+  // Tracking that is not the annotated quarter would illustrate the wrong play.
+  const trackingMismatch = useMemo(() => {
+    if (!tracking || !docA) return null
+    const m = tracking.quarterMeta
+    if (m.gameId !== docA.gameId || m.quarter !== docA.quarter) {
+      return `Tracking file is ${m.gameId} Q${m.quarter}, annotations are ${docA.gameId} Q${docA.quarter}`
+    }
+    return null
+  }, [tracking, docA])
+
   // Comparing different quarters produces numbers that look fine and mean
   // nothing, so it is refused rather than warned about.
   const mismatch = useMemo(() => {
@@ -47,11 +92,21 @@ export default function ComparePage({ onBack }: { onBack: () => void }) {
     [docA, docB, mismatch],
   )
 
-  const runs = useMemo(() => {
-    if (!report || !docA || !docB) return []
-    const ordered = [...new Set([...docA.buckets.keys(), ...docB.buckets.keys()])].sort((x, y) => y - x)
-    return buildDiffRuns(report.cells, ordered)
-  }, [report, docA, docB])
+  // One bucket list and one scale for every lane on this page. The strip
+  // compares the intersection and the grid renders the union, so deriving the
+  // scale separately would misalign them whenever the two files differ in span.
+  const orderedBuckets = useMemo(
+    () => (docA && docB
+      ? [...new Set([...docA.buckets.keys(), ...docB.buckets.keys()])].sort((x, y) => y - x)
+      : []),
+    [docA, docB],
+  )
+  const scale = useMemo(() => makeScale(orderedBuckets), [orderedBuckets])
+
+  const runs = useMemo(
+    () => (report ? buildDiffRuns(report.cells, orderedBuckets) : []),
+    [report, orderedBuckets],
+  )
 
   const reviewable = useMemo(() => runs.filter(r => isReviewable(r.status)), [runs])
 
@@ -118,16 +173,53 @@ export default function ComparePage({ onBack }: { onBack: () => void }) {
         <button onClick={onBack} style={btn()}>← Back</button>
         <strong style={{ fontSize: 14 }}>Compare Annotators</strong>
         {report && (
-          <button onClick={exportReport} style={{ ...btn(), marginLeft: 'auto' }}>
-            ⬇ Export disagreements CSV
-          </button>
+          <>
+            <button
+              onClick={onReviewDeadBalls}
+              disabled={!tracking || !!trackingMismatch}
+              title={!tracking
+                ? 'Load the quarter tracking JSON to review disagreements on the court'
+                : trackingMismatch ?? ''}
+              style={{ ...btn(), marginLeft: 'auto', opacity: tracking && !trackingMismatch ? 1 : 0.5 }}
+            >
+              Review dead-ball disagreements →
+            </button>
+            <button onClick={exportReport} style={btn()}>
+              ⬇ Export disagreements CSV
+            </button>
+          </>
         )}
       </div>
 
-      <div style={{ display: 'flex', gap: 12, padding: 12, flexShrink: 0 }}>
-        <DropSide label="Annotator A" doc={docA} error={errA} onFile={f => load('a', f)} />
-        <DropSide label="Annotator B" doc={docB} error={errB} onFile={f => load('b', f)} />
+      <div style={{ display: 'flex', gap: 12, padding: '12px 12px 0', flexShrink: 0 }}>
+        <AnnotationDropZone label="Annotator A" doc={docA} error={errA} onFile={f => load('a', f)} />
+        <AnnotationDropZone label="Annotator B" doc={docB} error={errB} onFile={f => load('b', f)} />
       </div>
+
+      <div style={{ display: 'flex', gap: 12, padding: 12, flexShrink: 0 }}>
+        <TrackingDropZone
+          label="Tracking data (for the review view)"
+          hint="Drop the quarter tracking JSON"
+          accept=".json"
+          loaded={tracking && `${tracking.quarterMeta.gameId} Q${tracking.quarterMeta.quarter} · ${tracking.frames.length} frames`}
+          error={errTracking}
+          onFile={loadTracking}
+        />
+        <TrackingDropZone
+          label="Game footage (optional)"
+          hint="Drop a video file"
+          accept="video/*"
+          loaded={videoUrl ? 'Video loaded' : null}
+          error={null}
+          onFile={f => setVideoFile(f)}
+        />
+      </div>
+
+      {trackingMismatch && (
+        <div role="alert" style={banner('var(--accent-danger)')}>
+          ⚠ {trackingMismatch} — the review view would show the wrong play.
+        </div>
+      )}
 
       {mismatch && (
         <div role="alert" style={banner('var(--accent-danger)')}>
@@ -170,10 +262,17 @@ export default function ComparePage({ onBack }: { onBack: () => void }) {
             <Card
               value={`${(report.deadLive.agreement * 100).toFixed(1)}%`}
               label="Dead-ball agreement"
-              sub={`n = ${report.deadLive.nCompared}`}
+              sub={`n = ${report.deadLive.nCompared} buckets · κ ${
+                report.deadLive.kappa === null ? '—' : report.deadLive.kappa.toFixed(3)
+              }`}
             />
             <Card value={String(report.nCoverageMismatch)} label="Only one annotated" sub="excluded from κ" muted />
-            <Card value={String(report.nDeadExcluded)} label="Dead ball" sub="excluded from assignments" muted />
+            <Card
+              value={String(report.nDeadExcluded)}
+              label="Cells in dead buckets"
+              sub="excluded from assignments"
+              muted
+            />
             <Card value={String(report.nDefenseMismatch)} label="Defending team differs" sub="excluded" muted />
           </div>
 
@@ -211,58 +310,20 @@ export default function ComparePage({ onBack }: { onBack: () => void }) {
             )}
           </div>
 
+          <DeadBallStrip
+            docA={docA!} docB={docB!} scale={scale}
+            onJumpToFrame={f => { if (framesLoaded) setCurrentFrame(f) }}
+          />
+
           <div style={{ flex: 1, minHeight: 0 }}>
             <DiffGrid
-              report={report} docA={docA!} docB={docB!}
+              report={report} docA={docA!} docB={docB!} scale={scale}
               selectedRun={selected} onSelectRun={jumpTo}
             />
           </div>
         </>
       )}
     </div>
-  )
-}
-
-function DropSide({ label, doc, error, onFile }: {
-  label: string
-  doc: AnnotationDocument | null
-  error: string | null
-  onFile: (f: File) => void
-}) {
-  const [over, setOver] = useState(false)
-  return (
-    <label
-      onDragOver={e => { e.preventDefault(); setOver(true) }}
-      onDragLeave={() => setOver(false)}
-      onDrop={e => {
-        e.preventDefault(); setOver(false)
-        const f = e.dataTransfer.files[0]; if (f) onFile(f)
-      }}
-      style={{
-        flex: 1, minHeight: 74, cursor: 'pointer', borderRadius: 6, padding: 10,
-        background: 'var(--bg-panel)',
-        border: `1px dashed ${over ? 'var(--accent, #4a90d9)' : error ? 'var(--accent-danger)' : 'var(--border)'}`,
-      }}
-    >
-      <div style={{ fontSize: 11, color: 'var(--text-4)', marginBottom: 4 }}>{label}</div>
-      {doc ? (
-        <div style={{ fontSize: 12 }}>
-          <strong style={{ fontSize: 14 }}>{doc.annotator || '(no annotator name in file)'}</strong>
-          <div style={{ color: 'var(--text-3)', marginTop: 2 }}>
-            {doc.gameId} · Q{doc.quarter} · {doc.buckets.size} buckets ·{' '}
-            <span style={{ textTransform: 'uppercase' }}>{doc.sourceFormat}</span>
-          </div>
-        </div>
-      ) : (
-        <div style={{ fontSize: 12, color: error ? 'var(--accent-danger)' : 'var(--text-3)' }}>
-          {error ?? 'Drop an exported JSON or CSV here'}
-        </div>
-      )}
-      <input
-        type="file" accept=".json,.csv" style={{ display: 'none' }}
-        onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f) }}
-      />
-    </label>
   )
 }
 

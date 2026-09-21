@@ -11,7 +11,12 @@ import PlaybackControls from './components/PlaybackControls'
 import AnnotationArea from './components/AnnotationArea'
 import SpellTimeline from './components/SpellTimeline'
 import ComparePage from './pages/ComparePage'
+import DeadBallReviewPage from './pages/DeadBallReviewPage'
+import type { AnnotationDocument } from './utils/annotationDocument'
+import type { LoadedTracking } from './components/TrackingDropZone'
 import { useStore } from './store/useStore'
+import { useResizable } from './hooks/useResizable'
+import ResizeHandle from './components/ResizeHandle'
 
 // ── Panel size constants ─────────────────────────────────────────────────────
 const VIDEO_DEFAULT_W = 480
@@ -27,7 +32,29 @@ const ROSTER_MIN_W = 140
 const ROSTER_MAX_W = 500
 
 export default function App() {
-  const [page, setPage] = useState<'home' | 'quarter-setup' | 'quarter' | 'compare'>('home')
+  const [page, setPage] = useState<'home' | 'quarter-setup' | 'quarter' | 'compare' | 'dead-review'>('home')
+
+  // The two annotators' files live here so the compare and review pages share
+  // them — navigating between the two must not mean re-dropping files.
+  // The keyboard effect below has empty deps, so it would close over a stale
+  // page value; a ref keeps the guard reading the live route.
+  const pageRef = useRef(page)
+  useEffect(() => { pageRef.current = page }, [page])
+
+  const [docA, setDocA] = useState<AnnotationDocument | null>(null)
+  const [docB, setDocB] = useState<AnnotationDocument | null>(null)
+
+  // The compare flow owns its own tracking and video so it never disturbs the
+  // annotate session: loadQuarter would clear cellAnnotations, and setVideoUrl
+  // revokes the annotator's blob URL.
+  const [tracking, setTracking] = useState<LoadedTracking | null>(null)
+  const [compareVideo, setCompareVideo] = useState<string | null>(null)
+  const setVideoFile = (f: File | null) => {
+    setCompareVideo(prev => {
+      if (prev) URL.revokeObjectURL(prev)
+      return f ? URL.createObjectURL(f) : null
+    })
+  }
 
   // Cells are how the work is entered; spells are the unit the analysis reads.
   const [bottomView, setBottomView] = useState<'grid' | 'spells'>('grid')
@@ -40,9 +67,10 @@ export default function App() {
     const t = setTimeout(() => setToast(null), 2200)
     return () => clearTimeout(t)
   }, [toast])
-  const [videoPx,  setVideoPx]  = useState(VIDEO_DEFAULT_W)
-  const [topPx,    setTopPx]    = useState(TOP_DEFAULT_H)
-  const [rosterPx, setRosterPx] = useState(ROSTER_DEFAULT_W)
+  const videoW  = useResizable({ axis: 'x', initial: VIDEO_DEFAULT_W,  min: VIDEO_MIN_W,  max: VIDEO_MAX_W })
+  // The roster sits on the right, so dragging left must grow it.
+  const rosterW = useResizable({ axis: 'x', initial: ROSTER_DEFAULT_W, min: ROSTER_MIN_W, max: ROSTER_MAX_W, invert: true })
+  const topH    = useResizable({ axis: 'y', initial: TOP_DEFAULT_H,    min: TOP_MIN_H,    max: TOP_MAX_H })
 
   const theme       = useStore(s => s.theme)
   const isPlaying   = useStore(s => s.isPlaying)
@@ -103,6 +131,11 @@ export default function App() {
       // check meant Space in the notes textarea toggled playback and was eaten.
       if (isEditableTarget(e.target)) return
 
+      // These hooks run before the routing returns, so they are live on every
+      // page. The read-only pages must not reach undo/redo — it mutates the
+      // annotator's saved work — and stepping buckets there means nothing.
+      if (pageRef.current === 'compare' || pageRef.current === 'dead-review') return
+
       const mod = e.metaKey || e.ctrlKey
       if (mod && e.key.toLowerCase() === 'z') {
         e.preventDefault()
@@ -133,65 +166,10 @@ export default function App() {
   }, [])
 
   // ── Drag-to-resize vertical divider (video ↔ court) ─────────────────────
-  const dividerDrag = useRef<{ startX: number; startW: number } | null>(null)
-
-  const onDividerMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault()
-    dividerDrag.current = { startX: e.clientX, startW: videoPx }
-    const onMove = (ev: MouseEvent) => {
-      if (!dividerDrag.current) return
-      const delta = ev.clientX - dividerDrag.current.startX
-      setVideoPx(Math.max(VIDEO_MIN_W, Math.min(VIDEO_MAX_W, dividerDrag.current.startW + delta)))
-    }
-    const onUp = () => {
-      dividerDrag.current = null
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-    }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-  }
 
   // ── Drag-to-resize roster panel (court ↔ roster) ────────────────────────
-  const rosterDrag = useRef<{ startX: number; startW: number } | null>(null)
-
-  const onRosterDividerMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault()
-    rosterDrag.current = { startX: e.clientX, startW: rosterPx }
-    const onMove = (ev: MouseEvent) => {
-      if (!rosterDrag.current) return
-      // dragging left increases roster width
-      const delta = rosterDrag.current.startX - ev.clientX
-      setRosterPx(Math.max(ROSTER_MIN_W, Math.min(ROSTER_MAX_W, rosterDrag.current.startW + delta)))
-    }
-    const onUp = () => {
-      rosterDrag.current = null
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-    }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-  }
 
   // ── Drag-to-resize horizontal divider (top ↔ annotation area) ────────────
-  const horizDrag = useRef<{ startY: number; startH: number } | null>(null)
-
-  const onHorizDividerMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault()
-    horizDrag.current = { startY: e.clientY, startH: topPx }
-    const onMove = (ev: MouseEvent) => {
-      if (!horizDrag.current) return
-      const delta = ev.clientY - horizDrag.current.startY
-      setTopPx(Math.max(TOP_MIN_H, Math.min(TOP_MAX_H, horizDrag.current.startH + delta)))
-    }
-    const onUp = () => {
-      horizDrag.current = null
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', onUp)
-    }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-  }
 
   // ── Page routing ─────────────────────────────────────────────────────────
   if (page === 'home') {
@@ -201,7 +179,20 @@ export default function App() {
     />
   }
   if (page === 'compare') {
-    return <ComparePage onBack={() => setPage('home')} />
+    return <ComparePage
+      onBack={() => setPage('home')}
+      docA={docA} docB={docB} setDocA={setDocA} setDocB={setDocB}
+      tracking={tracking} setTracking={setTracking}
+      videoUrl={compareVideo} setVideoFile={setVideoFile}
+      onReviewDeadBalls={() => setPage('dead-review')}
+    />
+  }
+  if (page === 'dead-review') {
+    return <DeadBallReviewPage
+      docA={docA} docB={docB}
+      tracking={tracking} videoUrl={compareVideo} setVideoFile={setVideoFile}
+      onBack={() => setPage('compare')}
+    />
   }
   if (page === 'quarter-setup') {
     return <QuarterSetupPage onStart={() => setPage('quarter')} onBack={() => setPage('home')} />
@@ -255,25 +246,13 @@ export default function App() {
       <PlaybackControls />
 
       {/* Top row: [Video | divider | Court | Roster] */}
-      <div style={{ display: 'flex', flexShrink: 0, height: topPx, minHeight: 0 }}>
+      <div style={{ display: 'flex', flexShrink: 0, height: topH.size, minHeight: 0 }}>
         {/* Video panel — resizable width */}
-        <div style={{ width: videoPx, flexShrink: 0, overflow: 'hidden' }}>
+        <div style={{ width: videoW.size, flexShrink: 0, overflow: 'hidden' }}>
           <VideoPanel />
         </div>
 
-        {/* Drag handle */}
-        <div
-          onMouseDown={onDividerMouseDown}
-          title="Drag to resize"
-          style={{
-            width: 6, flexShrink: 0, background: 'var(--bg-surface)',
-            borderLeft: '1px solid var(--border)', borderRight: '1px solid var(--border)',
-            cursor: 'col-resize', display: 'flex', alignItems: 'center',
-            justifyContent: 'center', userSelect: 'none', zIndex: 10,
-          }}
-        >
-          <span style={{ color: 'var(--divider-fg)', fontSize: 10, writingMode: 'vertical-rl', letterSpacing: 2 }}>⠿</span>
-        </div>
+        <ResizeHandle resizable={videoW} label="Resize the video panel" />
 
         {/* Court — takes remaining space */}
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
@@ -282,42 +261,15 @@ export default function App() {
           </div>
         </div>
 
-        {/* Drag handle between court and roster */}
-        <div
-          onMouseDown={onRosterDividerMouseDown}
-          title="Drag to resize roster"
-          style={{
-            width: 6, flexShrink: 0, background: 'var(--bg-surface)',
-            borderLeft: '1px solid var(--border)', borderRight: '1px solid var(--border)',
-            cursor: 'col-resize', display: 'flex', alignItems: 'center',
-            justifyContent: 'center', userSelect: 'none', zIndex: 10,
-          }}
-        >
-          <span style={{ color: 'var(--divider-fg)', fontSize: 10, writingMode: 'vertical-rl', letterSpacing: 2 }}>⠿</span>
-        </div>
+        <ResizeHandle resizable={rosterW} label="Resize the roster panel" />
 
         {/* Roster — resizable */}
-        <div style={{ width: rosterPx, flexShrink: 0, overflow: 'hidden' }}>
+        <div style={{ width: rosterW.size, flexShrink: 0, overflow: 'hidden' }}>
           <RosterPanel />
         </div>
       </div>
 
-      {/* Horizontal drag handle between top section and annotation area */}
-      <div
-        onMouseDown={onHorizDividerMouseDown}
-        title="Drag to resize"
-        style={{
-          height: 6, flexShrink: 0,
-          background: 'var(--bg-surface)',
-          borderTop: '1px solid var(--border)',
-          borderBottom: '1px solid var(--border)',
-          cursor: 'row-resize',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          userSelect: 'none', zIndex: 10,
-        }}
-      >
-        <span style={{ color: 'var(--divider-fg)', fontSize: 10, letterSpacing: 4 }}>⠿</span>
-      </div>
+      <ResizeHandle resizable={topH} label="Resize the video and court row" />
 
       {/* Bottom pane: per-bucket grid, or the spells derived from it */}
       <div style={{
