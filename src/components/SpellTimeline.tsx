@@ -88,7 +88,7 @@ export default function SpellTimeline() {
       </div>
 
       {/* Rows */}
-      <div style={{ flex: 1, overflow: 'auto' }}>
+      <div data-scroll-x style={{ flex: 1, overflow: 'auto' }}>
         <div style={{ position: 'relative', width: LABEL_W + totalW }}>
           {currentBucket !== null && (
             <div style={{

@@ -112,7 +112,7 @@ export default function DeadBallStrip({ docA, docB, onJumpToFrame, scale: shared
       )}
 
       {/* One scroll container so the axis, chart and lanes move together */}
-      <div style={{ overflowX: 'auto' }}>
+      <div data-scroll-x style={{ overflowX: 'auto' }}>
         <div style={{ position: 'relative', width: LABEL_W + scale.totalW }}>
           <TimeAxis scale={scale} buckets={cmp.orderedBuckets} />
           <div style={{ padding: '4px 0' }}>

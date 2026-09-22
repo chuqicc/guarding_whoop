@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { AnnotationDocument } from '../utils/annotationDocument'
-import { compareDeadSpans, type DeadDisagreement } from '../utils/deadSpans'
+import { compareDeadSpans } from '../utils/deadSpans'
+import { compareDefenseSpans } from '../utils/defenseSpans'
 import { isEditableTarget } from '../utils/isEditableTarget'
 import type { LoadedTracking } from '../components/TrackingDropZone'
 import { fmtClock } from '../utils/timelineScale'
@@ -9,9 +10,10 @@ import ResizeHandle from '../components/ResizeHandle'
 import CourtCanvas from '../components/CourtCanvas'
 import VideoPanel from '../components/VideoPanel'
 import DeadBallStrip from '../components/DeadBallStrip'
+import DefenseTeamStrip from '../components/DefenseTeamStrip'
 
 /**
- * Step through dead-ball disagreements with the court and video in view.
+ * Step through disagreements with the court and video in view.
  *
  * Everything here comes from the compare flow, which parsed the tracking file
  * itself. Nothing touches the annotation store — not the frames, not the
@@ -23,6 +25,18 @@ import DeadBallStrip from '../components/DeadBallStrip'
  * shown large: broadcast footage has a clock on screen, and that is the only
  * practical way to find the same moment by hand.
  */
+
+type ReviewMode = 'dead' | 'defense'
+
+/** Both kinds of disagreement reduce to this, so one stepper serves both. */
+interface ReviewRegion {
+  startBucket: number
+  endBucket: number
+  durationS: number
+  frameStart?: number
+  saidA: string
+  saidB: string
+}
 
 interface Props {
   docA: AnnotationDocument | null
@@ -42,18 +56,56 @@ export default function DeadBallReviewPage({
   // The playhead is local: moving it must not disturb the annotate session.
   const [currentFrame, setCurrentFrame] = useState(0)
   const [index, setIndex] = useState(0)
+  const [chosenMode, setChosenMode] = useState<ReviewMode | null>(null)
 
   const videoW = useResizable({ axis: 'x', initial: 360, min: 200, max: 900 })
   const mediaH = useResizable({ axis: 'y', initial: 300, min: 180, max: 700 })
 
-  const cmp = useMemo(
+  const dead = useMemo(
     () => (docA && docB ? compareDeadSpans(docA, docB) : null),
     [docA, docB],
   )
-  const regions: DeadDisagreement[] = useMemo(
-    () => cmp?.disagreements ?? [],
-    [cmp],
+  const defense = useMemo(
+    () => (docA && docB ? compareDefenseSpans(docA, docB) : null),
+    [docA, docB],
   )
+
+  const nameA = docA?.annotator || 'A'
+  const nameB = docB?.annotator || 'B'
+
+  const counts = {
+    dead: dead?.disagreements.length ?? 0,
+    defense: defense?.disagreements.length ?? 0,
+  }
+
+  // Open on the most damaging kind that actually has something to review —
+  // landing on an empty list is a dead end, however severe that kind is.
+  const mode: ReviewMode = chosenMode ?? (counts.defense > 0 ? 'defense' : 'dead')
+
+  // Both kinds of disagreement reduce to "a stretch of clock, and what each
+  // annotator said there", so one stepper serves both.
+  const regions: ReviewRegion[] = useMemo(() => {
+    if (mode === 'dead') {
+      return (dead?.disagreements ?? []).map(d => ({
+        startBucket: d.startBucket,
+        endBucket: d.endBucket,
+        durationS: d.durationS,
+        frameStart: d.frameStart,
+        saidA: d.deadSide === 'a' ? 'dead' : 'live',
+        saidB: d.deadSide === 'a' ? 'live' : 'dead',
+      }))
+    }
+    return (defense?.disagreements ?? []).map(d => ({
+      startBucket: d.startBucket,
+      endBucket: d.endBucket,
+      durationS: d.durationS,
+      frameStart: d.frameStart,
+      saidA: d.teamA,
+      saidB: d.teamB,
+    }))
+  }, [mode, dead, defense])
+
+
 
   // Borrowed tracking data is only trustworthy if it is the same quarter.
   const trackingMismatch = useMemo(() => {
@@ -86,13 +138,11 @@ export default function DeadBallReviewPage({
     return () => window.removeEventListener('keydown', onKey)
   }, [goTo, index])
 
-  const nameA = docA?.annotator || 'A'
-  const nameB = docB?.annotator || 'B'
   const clockNow = frames[currentFrame]?.quarterClock
 
   if (!docA || !docB) {
     return (
-      <Shell onBack={onBack} title="Dead-ball review">
+      <Shell onBack={onBack} title="Disagreement review">
         <div style={{ padding: 16, fontSize: 13, color: 'var(--text-3)' }}>
           Load two annotators' files on the compare page first, then come back here.
         </div>
@@ -103,7 +153,7 @@ export default function DeadBallReviewPage({
   return (
     <Shell
       onBack={onBack}
-      title="Dead-ball review"
+      title="Disagreement review"
       subtitle={`${nameA} vs ${nameB} · ${docA.gameId} Q${docA.quarter} · ${regions.length} disagreement(s)`}
     >
       {trackingMismatch && (
@@ -154,6 +204,33 @@ export default function DeadBallReviewPage({
         </span>
       </div>
 
+      {/* Which kind of disagreement to walk through */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+        padding: '6px 12px', borderTop: '1px solid var(--border)', fontSize: 12,
+      }}>
+        {([
+          ['defense', 'Defending team', counts.defense],
+          ['dead', 'Dead ball', counts.dead],
+        ] as const).map(([m, label, n]) => (
+          <button
+            key={m}
+            onClick={() => { setChosenMode(m); setIndex(0) }}
+            aria-pressed={mode === m}
+            style={{
+              ...btn(),
+              background: mode === m ? 'var(--bg-col-active)' : 'var(--bg-surface)',
+              borderColor: mode === m ? 'var(--accent)' : 'var(--border)',
+            }}
+          >
+            {label} ({n})
+          </button>
+        ))}
+        <span style={{ marginLeft: 8, color: 'var(--text-4)', fontSize: 11 }}>
+          Defending-team errors mis-orient a whole possession, so review those first.
+        </span>
+      </div>
+
       {/* Region stepper */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
@@ -164,7 +241,8 @@ export default function DeadBallReviewPage({
 
         {regions.length === 0 ? (
           <span style={{ color: 'var(--text-3)' }}>
-            No dead-ball disagreements — {nameA} and {nameB} marked the same buckets.
+            No {mode === 'dead' ? 'dead-ball' : 'defending-team'} disagreements — {nameA} and{' '}
+            {nameB} agree throughout.
           </span>
         ) : current && (
           <>
@@ -172,9 +250,9 @@ export default function DeadBallReviewPage({
               {index + 1} / {regions.length}
             </span>
             <span style={{ color: 'var(--text-1)' }}>
-              <strong>{current.deadSide === 'a' ? nameA : nameB}</strong>: dead
+              <strong>{nameA}</strong>: {current.saidA}
               {'  ·  '}
-              <strong>{current.deadSide === 'a' ? nameB : nameA}</strong>: live
+              <strong>{nameB}</strong>: {current.saidB}
             </span>
             <span style={{ color: 'var(--text-3)' }}>
               {fmtClock(current.startBucket)} → {fmtClock(current.endBucket)}
@@ -184,9 +262,14 @@ export default function DeadBallReviewPage({
         )}
       </div>
 
-      <DeadBallStrip docA={docA} docB={docB} onJumpToFrame={f => {
-        if (trackingUsable) setCurrentFrame(f)
-      }} />
+      <DefenseTeamStrip
+        docA={docA} docB={docB}
+        onJumpToFrame={f => { if (trackingUsable) setCurrentFrame(f) }}
+      />
+      <DeadBallStrip
+        docA={docA} docB={docB}
+        onJumpToFrame={f => { if (trackingUsable) setCurrentFrame(f) }}
+      />
     </Shell>
   )
 }

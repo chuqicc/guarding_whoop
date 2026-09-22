@@ -247,3 +247,69 @@ describe('switch-event agreement', () => {
     expect(switchEventsOf(d, allBuckets, frameStart).get(1)).toEqual([])
   })
 })
+
+describe('per-event switch results — what a timeline needs', () => {
+  const buckets = ['400', '399.5', '399', '398.5', '398']
+
+  const withSwitchAt = (name: string, switchBucket: number) => {
+    const spec: Record<string, BucketSpec> = {}
+    for (const b of buckets) {
+      const n = Number(b)
+      spec[b] = { assignments: { 1: n >= switchBucket ? 6 : 7 } }
+    }
+    return doc(name, spec)
+  }
+
+  it('reports each switch with the bucket it was matched to', () => {
+    const r = computeAgreement(withSwitchAt('Alice', 399.5), withSwitchAt('Bob', 399))
+    const row = r.switchEvents.byDefender.find(d => d.defenderId === 1)!
+
+    expect(row.events).toHaveLength(2)          // one from each side
+    for (const e of row.events) {
+      expect(e.matchedBucket).not.toBeNull()
+    }
+  })
+
+  it('gives the offset a sign, so systematic earliness is visible', () => {
+    // Alice's change begins one bucket before Bob's.
+    const r = computeAgreement(withSwitchAt('Alice', 399.5), withSwitchAt('Bob', 399))
+    const events = r.switchEvents.byDefender[0].events
+    const a = events.find(e => e.side === 'a')!
+    const b = events.find(e => e.side === 'b')!
+
+    expect(a.offsetBuckets).toBeCloseTo(1)      // A earlier
+    expect(b.offsetBuckets).toBeCloseTo(-1)     // B later, mirror image
+  })
+
+  it('marks a switch the other annotator missed entirely', () => {
+    const never: Record<string, BucketSpec> = {}
+    for (const b of buckets) never[b] = { assignments: { 1: 6 } }
+    const r = computeAgreement(withSwitchAt('Alice', 399), doc('Bob', never))
+    const events = r.switchEvents.byDefender[0].events
+
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ side: 'a', matchedBucket: null, offsetBuckets: null })
+  })
+
+  it('agrees with the aggregate counts it is derived from', () => {
+    const r = computeAgreement(withSwitchAt('Alice', 399.5), withSwitchAt('Bob', 399))
+    const all = r.switchEvents.byDefender.flatMap(d => d.events)
+
+    expect(all.filter(e => e.side === 'a')).toHaveLength(r.switchEvents.nA)
+    expect(all.filter(e => e.side === 'b')).toHaveLength(r.switchEvents.nB)
+    expect(all.filter(e => e.side === 'a' && e.matchedBucket !== null))
+      .toHaveLength(r.switchEvents.matched)
+  })
+
+  it('carries a frame so an event can be replayed', () => {
+    const r = computeAgreement(withSwitchAt('Alice', 399.5), withSwitchAt('Bob', 399))
+    expect(r.switchEvents.byDefender[0].events[0].frameStart).toBeTypeOf('number')
+  })
+
+  it('is empty when neither annotator recorded a switch', () => {
+    const flat: Record<string, BucketSpec> = {}
+    for (const b of buckets) flat[b] = { assignments: { 1: 6 } }
+    const r = computeAgreement(doc('Alice', flat), doc('Bob', flat))
+    expect(r.switchEvents.byDefender.flatMap(d => d.events)).toEqual([])
+  })
+})

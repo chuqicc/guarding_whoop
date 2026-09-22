@@ -68,12 +68,24 @@ export default function DiffGrid({ report, docA, docB, selectedRun, onSelectRun,
             <span style={{ color: 'var(--text-3)' }}>{STATUS_STYLE[s].label}</span>
           </span>
         ))}
+        <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          <span aria-hidden="true" style={{
+            width: 11, height: 11, borderRadius: 2, flexShrink: 0,
+            border: '1px solid var(--border)', display: 'flex', flexDirection: 'column',
+          }}>
+            <span style={{ flex: 1, background: 'var(--annot-a)' }} />
+            <span style={{ flex: 1, background: 'var(--annot-b)' }} />
+          </span>
+          <span style={{ color: 'var(--text-3)' }}>
+            too short to label ({report.annotatorA || 'A'} over {report.annotatorB || 'B'})
+          </span>
+        </span>
         <span style={{ marginLeft: 'auto', color: 'var(--text-4)' }}>
-          n / p to step between disagreements · click a bar to jump there
+          n / p to step · click a bar to jump · the list view shows both answers
         </span>
       </div>
 
-      <div style={{ flex: 1, overflow: 'auto' }}>
+      <div data-scroll-x style={{ flex: 1, overflow: 'auto' }}>
         <div style={{ position: 'relative', width: LABEL_W + totalW }}>
           {defenderIds.map(defId => {
             const p = players[defId]
@@ -125,7 +137,9 @@ export default function DiffGrid({ report, docA, docB, selectedRun, onSelectRun,
                         title={title}
                         aria-label={title}
                         style={{
-                          position: 'absolute', left: xOf(r.startBucket), width,
+                          position: 'absolute', left: xOf(r.startBucket),
+                          // Below this a bar is unclickable as well as unreadable.
+                          width: Math.max(width, isReviewable(r.status) ? 6 : width),
                           top: 4, height: ROW_H - 8,
                           background: st.bg, color: st.fg,
                           border: selected ? '2px solid var(--accent, #4a90d9)' : '1px solid var(--border)',
@@ -135,6 +149,23 @@ export default function DiffGrid({ report, docA, docB, selectedRun, onSelectRun,
                         }}
                       >
                         {width > 46 && isReviewable(r.status) ? detail : ''}
+                        {/* Most disagreements are a bucket or two — far too
+                            narrow for text, so they used to render as mute
+                            slivers you had to hover to identify. A split gives
+                            them a shape at any width: top half is what the
+                            first annotator said, bottom half the second. */}
+                        {isReviewable(r.status) && width <= 46 && (
+                          <span
+                            aria-hidden="true"
+                            style={{
+                              position: 'absolute', inset: 0,
+                              display: 'flex', flexDirection: 'column',
+                            }}
+                          >
+                            <span style={{ flex: 1, background: 'var(--annot-a)' }} />
+                            <span style={{ flex: 1, background: 'var(--annot-b)' }} />
+                          </span>
+                        )}
                       </button>
                     )
                   })}

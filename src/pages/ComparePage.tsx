@@ -2,10 +2,17 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { parseAnnotationDocument, UnsupportedAnnotationFile, type AnnotationDocument } from '../utils/annotationDocument'
 import { computeAgreement } from '../utils/agreement'
 import { csvRow, download } from '../utils/export'
+import { buildAgreementReportHTML } from '../utils/agreementReport'
+import { compareDeadSpans } from '../utils/deadSpans'
+import { compareDefenseSpans } from '../utils/defenseSpans'
 import { useStore } from '../store/useStore'
 import { isEditableTarget } from '../utils/isEditableTarget'
 import DiffGrid from '../components/DiffGrid'
 import DeadBallStrip from '../components/DeadBallStrip'
+import DefenseTeamStrip from '../components/DefenseTeamStrip'
+import SwitchTimingLane from '../components/SwitchTimingLane'
+import PerDefenderTable from '../components/PerDefenderTable'
+import DisagreementQueue from '../components/DisagreementQueue'
 import AnnotationDropZone from '../components/AnnotationDropZone'
 import TrackingDropZone, { type LoadedTracking } from '../components/TrackingDropZone'
 import { parseQuarterJSON } from '../utils/parseQuarterJSON'
@@ -37,6 +44,9 @@ export default function ComparePage({
   const [errA, setErrA] = useState<string | null>(null)
   const [errB, setErrB] = useState<string | null>(null)
   const [selected, setSelected] = useState<DiffRun | null>(null)
+  // Most disagreements are a bucket or two long — far too narrow to read on a
+  // timeline — so the list is the default place to work through them.
+  const [bottomView, setBottomView] = useState<'list' | 'timeline'>('list')
 
   const setCurrentFrame = useStore(s => s.setCurrentFrame)
   const framesLoaded = useStore(s => s.frames.length > 0)
@@ -142,6 +152,16 @@ export default function ComparePage({
     return doc?.players[id as number]?.jersey ? `#${doc.players[id as number].jersey}` : String(id)
   }
 
+  const exportHTML = () => {
+    if (!report || !docA || !docB) return
+    const html = buildAgreementReportHTML({
+      report, docA, docB,
+      dead: compareDeadSpans(docA, docB),
+      defense: compareDefenseSpans(docA, docB),
+    })
+    download(html, `agreement_${report.gameId}_Q${report.quarter}.html`, 'text/html')
+  }
+
   const exportReport = () => {
     if (!report) return
     const header = csvRow([
@@ -182,10 +202,13 @@ export default function ComparePage({
                 : trackingMismatch ?? ''}
               style={{ ...btn(), marginLeft: 'auto', opacity: tracking && !trackingMismatch ? 1 : 0.5 }}
             >
-              Review dead-ball disagreements →
+              Review disagreements →
+            </button>
+            <button onClick={exportHTML} style={btn()}>
+              ⬇ Reliability report
             </button>
             <button onClick={exportReport} style={btn()}>
-              ⬇ Export disagreements CSV
+              ⬇ Disagreements CSV
             </button>
           </>
         )}
@@ -237,34 +260,43 @@ export default function ComparePage({
         <div role="alert" style={banner('#7b3fa0')}>
           ⚠ The two annotators disagree about which team was defending in{' '}
           {report.defenseMismatchBuckets.length} bucket(s), excluding {report.nDefenseMismatch} cell(s).
-          This is a possession-level disagreement, not a cell-level one.
+          This is a possession-level disagreement, not a cell-level one — see the
+          defending-team lanes below to find them.
         </div>
       )}
 
       {report && (
         <>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', padding: '0 12px 10px' }}>
+            {/* Ordered by how much the numbers can be trusted. The switch-event
+                F1 leads because carry-forward inflates every per-bucket rate;
+                the old order put the most inflated figure first. */}
             <Card
-              value={`${(report.rawAgreement * 100).toFixed(1)}%`}
-              label="Raw agreement"
-              sub={`n = ${report.nCompared}`}
-            />
-            <Card
-              value={report.kappaPooled === null ? '—' : report.kappaPooled.toFixed(3)}
-              label="Cohen's κ (pooled)"
-              sub={report.kappaPooled === null ? 'Only one category used — κ is undefined' : `mean per defender ${report.kappaMeanPerDefender?.toFixed(3) ?? '—'}`}
-            />
-            <Card
-              value={report.switchEvents.f1.toFixed(3)}
+              value={report.switchEvents.f1.toFixed(2)}
               label="Switch-event F1"
-              sub={`±${report.switchEvents.toleranceBuckets} bucket · A ${report.switchEvents.nA} / B ${report.switchEvents.nB} · matched ${report.switchEvents.matched}`}
+              sub={`±${report.switchEvents.toleranceBuckets} bucket · precision ${
+                report.switchEvents.precision.toFixed(2)} / recall ${
+                report.switchEvents.recall.toFixed(2)}`}
+              emphasis
             />
             <Card
               value={`${(report.deadLive.agreement * 100).toFixed(1)}%`}
               label="Dead-ball agreement"
               sub={`n = ${report.deadLive.nCompared} buckets · κ ${
-                report.deadLive.kappa === null ? '—' : report.deadLive.kappa.toFixed(3)
+                report.deadLive.kappa === null ? '—' : report.deadLive.kappa.toFixed(2)
               }`}
+            />
+            <Card
+              value={report.kappaPooled === null ? '—' : report.kappaPooled.toFixed(2)}
+              label="Cohen's κ (pooled)"
+              sub={report.kappaPooled === null
+                ? 'Only one category used — κ is undefined'
+                : `mean per defender ${report.kappaMeanPerDefender?.toFixed(2) ?? '—'}`}
+            />
+            <Card
+              value={`${(report.rawAgreement * 100).toFixed(1)}%`}
+              label="Raw agreement"
+              sub={`n = ${report.nCompared} · inflated by carry-forward`}
             />
             <Card value={String(report.nCoverageMismatch)} label="Only one annotated" sub="excluded from κ" muted />
             <Card
@@ -276,22 +308,45 @@ export default function ComparePage({
             <Card value={String(report.nDefenseMismatch)} label="Defending team differs" sub="excluded" muted />
           </div>
 
-          <details style={{ padding: '0 12px 10px', fontSize: 12, color: 'var(--text-3)' }}>
-            <summary style={{ cursor: 'pointer' }}>
-              How to read these numbers ({report.caveats.length} caveats · read before quoting them)
-            </summary>
-            <ul style={{ margin: '8px 0 0 18px', lineHeight: 1.6 }}>
+          <div style={{ padding: '0 12px 10px', fontSize: 12, color: 'var(--text-3)' }}>
+            <strong style={{ color: 'var(--text-2)' }}>
+              How to read these numbers
+            </strong>
+            {/* Not collapsed: one of these caveats says the cleanest metric is
+                unavailable, and hiding that makes the headline figure look
+                better than it is. */}
+            <ul style={{ margin: '6px 0 0 18px', lineHeight: 1.6 }}>
               {report.caveats.map((c, i) => <li key={i}>{c}</li>)}
             </ul>
-            <div style={{ marginTop: 8 }}>
-              <strong>Marginals</strong> (so you can see how much room chance had):
-              {report.marginals.map(m => (
-                <span key={m.category} style={{ marginLeft: 8 }}>
-                  {m.category}: A {m.aCount} / B {m.bCount}
-                </span>
-              ))}
-            </div>
-          </details>
+
+            <details style={{ marginTop: 8 }}>
+              <summary style={{ cursor: 'pointer' }}>
+                Marginals ({report.marginals.length} categories) — how much room chance had
+              </summary>
+              <table style={{ borderCollapse: 'collapse', fontSize: 11, marginTop: 6 }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                    <th style={{ textAlign: 'left', padding: '3px 10px 3px 0' }}>Category</th>
+                    <th style={{ textAlign: 'right', padding: '3px 10px' }}>
+                      {report.annotatorA || 'A'}
+                    </th>
+                    <th style={{ textAlign: 'right', padding: '3px 10px' }}>
+                      {report.annotatorB || 'B'}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.marginals.map(m => (
+                    <tr key={m.category} style={{ borderBottom: '1px solid var(--border-dim)' }}>
+                      <td style={{ padding: '2px 10px 2px 0' }}>{m.category}</td>
+                      <td style={{ padding: '2px 10px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{m.aCount}</td>
+                      <td style={{ padding: '2px 10px', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{m.bCount}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </details>
+          </div>
 
           <div style={{
             display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
@@ -310,16 +365,59 @@ export default function ComparePage({
             )}
           </div>
 
+          <PerDefenderTable report={report} docA={docA!} docB={docB!} />
+
+          <DefenseTeamStrip
+            docA={docA!} docB={docB!} scale={scale}
+            onJumpToFrame={f => { if (framesLoaded) setCurrentFrame(f) }}
+          />
+
+          <SwitchTimingLane
+            report={report} docA={docA!} docB={docB!} scale={scale}
+            onJumpToFrame={f => { if (framesLoaded) setCurrentFrame(f) }}
+          />
+
           <DeadBallStrip
             docA={docA!} docB={docB!} scale={scale}
             onJumpToFrame={f => { if (framesLoaded) setCurrentFrame(f) }}
           />
 
+          <div style={{
+            display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0,
+            padding: '4px 12px', borderTop: '1px solid var(--border)',
+            background: 'var(--bg-surface)',
+          }}>
+            {([['list', '☰ List'], ['timeline', '▦ Timeline']] as const).map(([v, label]) => (
+              <button
+                key={v}
+                onClick={() => setBottomView(v)}
+                aria-pressed={bottomView === v}
+                style={{
+                  background: bottomView === v ? 'var(--bg-col-active)' : 'transparent',
+                  color: bottomView === v ? 'var(--text-1)' : 'var(--text-3)',
+                  border: `1px solid ${bottomView === v ? 'var(--border)' : 'transparent'}`,
+                  borderRadius: 4, padding: '2px 10px', fontSize: 12, cursor: 'pointer',
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
           <div style={{ flex: 1, minHeight: 0 }}>
-            <DiffGrid
-              report={report} docA={docA!} docB={docB!} scale={scale}
-              selectedRun={selected} onSelectRun={jumpTo}
-            />
+            {bottomView === 'list' ? (
+              <DisagreementQueue
+                runs={reviewable} docA={docA!} docB={docB!}
+                annotatorA={report.annotatorA || 'A'}
+                annotatorB={report.annotatorB || 'B'}
+                selected={selected} onSelect={jumpTo}
+              />
+            ) : (
+              <DiffGrid
+                report={report} docA={docA!} docB={docB!} scale={scale}
+                selectedRun={selected} onSelectRun={jumpTo}
+              />
+            )}
           </div>
         </>
       )}
@@ -327,12 +425,13 @@ export default function ComparePage({
   )
 }
 
-function Card({ value, label, sub, muted }: {
-  value: string; label: string; sub?: string; muted?: boolean
+function Card({ value, label, sub, muted, emphasis }: {
+  value: string; label: string; sub?: string; muted?: boolean; emphasis?: boolean
 }) {
   return (
     <div style={{
-      background: 'var(--bg-panel)', border: '1px solid var(--border)',
+      background: 'var(--bg-panel)',
+      border: `1px solid ${emphasis ? 'var(--accent)' : 'var(--border)'}`,
       borderRadius: 6, padding: '8px 12px', minWidth: 132,
       opacity: muted ? 0.75 : 1,
     }}>

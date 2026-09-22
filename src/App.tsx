@@ -16,6 +16,7 @@ import type { AnnotationDocument } from './utils/annotationDocument'
 import type { LoadedTracking } from './components/TrackingDropZone'
 import { useStore } from './store/useStore'
 import { useResizable } from './hooks/useResizable'
+import { useUnloadGuard } from './hooks/useUnloadGuard'
 import ResizeHandle from './components/ResizeHandle'
 
 // ── Panel size constants ─────────────────────────────────────────────────────
@@ -76,6 +77,13 @@ export default function App() {
   const isPlaying   = useStore(s => s.isPlaying)
   const currentFrame = useStore(s => s.currentFrame)
   const frames      = useStore(s => s.frames)
+
+  // Everything loaded lives in memory, so leaving the page throws the session
+  // away. Arm the warning only when there is actually something to lose.
+  useUnloadGuard(
+    frames.length > 0 || docA !== null || docB !== null
+    || tracking !== null || compareVideo !== null,
+  )
   const setCurrentFrame = useStore(s => s.setCurrentFrame)
   const setPlaying  = useStore(s => s.setPlaying)
   const playbackSpeed = useStore(s => s.playbackSpeed)

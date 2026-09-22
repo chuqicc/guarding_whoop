@@ -276,6 +276,7 @@ export default function AnnotationArea() {
       {/* Table — scrolls both directions */}
       <div
         ref={scrollRef}
+        data-scroll-x
         style={{ flex: 1, minHeight: 0, overflow: 'auto', userSelect: 'none' }}
       >
       <table style={{ width: tableW, minWidth: tableW, borderCollapse: 'collapse', tableLayout: 'fixed' }}>

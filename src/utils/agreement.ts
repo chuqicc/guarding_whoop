@@ -2,6 +2,7 @@ import type { AttackerId, CellAnnotation } from '../store/useStore'
 import { QUARTER_BUCKET_S } from '../constants'
 import { computeMarkingSpells } from './spells'
 import type { AnnotationDocument } from './annotationDocument'
+import type { Side } from './deadSpans'
 
 /**
  * Inter-rater reliability between exactly two annotators of the same quarter.
@@ -37,6 +38,17 @@ export interface CellComparison {
   status: CellStatus
 }
 
+/** One annotator's switch, and whether the other caught it. */
+export interface SwitchEvent {
+  bucket: number
+  side: Side
+  /** The other annotator's matching switch, or null when they missed it. */
+  matchedBucket: number | null
+  /** Signed offset in buckets; positive = this side marked it earlier. */
+  offsetBuckets: number | null
+  frameStart?: number
+}
+
 export interface SwitchEventAgreement {
   toleranceBuckets: number
   nA: number
@@ -48,6 +60,15 @@ export interface SwitchEventAgreement {
   f1: number
   /** Signed median of (A − B) in buckets. Positive = A marked the switch earlier. */
   medianOffsetBuckets: number | null
+  /**
+   * Every switch, per defender, with its match result.
+   *
+   * The aggregate F1 says how well the two agree but not WHERE they differ, and
+   * the raw events used to be consumed inside this module and discarded — so a
+   * "which switches did they both catch" view was not reconstructible from the
+   * report at all.
+   */
+  byDefender: Array<{ defenderId: number; events: SwitchEvent[] }>
 }
 
 export interface DefenderAgreement {
@@ -201,10 +222,17 @@ export function switchEventsOf(
   return events
 }
 
-/** Greedy nearest-first matching of two event lists within a tolerance. */
+/**
+ * Greedy nearest-first matching of two event lists within a tolerance.
+ *
+ * Returns the pairing itself, not just a count: which A event went with which B
+ * event is what a timeline needs in order to draw the two apart.
+ */
 function matchEvents(a: number[], b: number[], toleranceValue: number) {
   const usedB = new Set<number>()
   const offsets: number[] = []
+  /** a-bucket -> matched b-bucket */
+  const pairs = new Map<number, number>()
 
   for (const ta of [...a].sort((x, y) => y - x)) {
     let best = -1
@@ -214,9 +242,13 @@ function matchEvents(a: number[], b: number[], toleranceValue: number) {
       const d = Math.abs(ta - b[j])
       if (d <= toleranceValue && d < bestDist) { bestDist = d; best = j }
     }
-    if (best !== -1) { usedB.add(best); offsets.push(ta - b[best]) }
+    if (best !== -1) {
+      usedB.add(best)
+      offsets.push(ta - b[best])
+      pairs.set(ta, b[best])
+    }
   }
-  return { matched: offsets.length, offsets }
+  return { matched: offsets.length, offsets, pairs }
 }
 
 function median(xs: number[]): number | null {
@@ -343,7 +375,9 @@ export function computeAgreement(
 
   let nA = 0, nB = 0, matched = 0
   const offsets: number[] = []
-  for (const defenderId of new Set([...evA.keys(), ...evB.keys()])) {
+  const byDefender: SwitchEventAgreement['byDefender'] = []
+
+  for (const defenderId of [...new Set([...evA.keys(), ...evB.keys()])].sort((x, y) => x - y)) {
     const a = evA.get(defenderId) ?? []
     const b = evB.get(defenderId) ?? []
     nA += a.length
@@ -351,6 +385,34 @@ export function computeAgreement(
     const m = matchEvents(a, b, toleranceValue)
     matched += m.matched
     offsets.push(...m.offsets)
+
+    const matchedB = new Set(m.pairs.values())
+    const events: SwitchEvent[] = [
+      ...a.map(bucket => {
+        const mb = m.pairs.get(bucket)
+        return {
+          bucket, side: 'a' as Side,
+          matchedBucket: mb ?? null,
+          offsetBuckets: mb === undefined ? null : (bucket - mb) / QUARTER_BUCKET_S,
+          frameStart: bucketFrameStart.get(bucket),
+        }
+      }),
+      ...b.map(bucket => {
+        const isMatched = matchedB.has(bucket)
+        // Find the A event this one was paired with, for the reverse link.
+        const pairedA = isMatched
+          ? [...m.pairs.entries()].find(([, bb]) => bb === bucket)?.[0] ?? null
+          : null
+        return {
+          bucket, side: 'b' as Side,
+          matchedBucket: pairedA,
+          offsetBuckets: pairedA === null ? null : (bucket - pairedA) / QUARTER_BUCKET_S,
+          frameStart: bucketFrameStart.get(bucket),
+        }
+      }),
+    ].sort((x, y) => y.bucket - x.bucket)
+
+    byDefender.push({ defenderId, events })
   }
   const precision = nB ? matched / nB : 0
   const recall = nA ? matched / nA : 0
@@ -408,6 +470,7 @@ export function computeAgreement(
       precision, recall,
       f1: precision + recall ? (2 * precision * recall) / (precision + recall) : 0,
       medianOffsetBuckets: medOffset === null ? null : medOffset / QUARTER_BUCKET_S,
+      byDefender,
     },
 
     defenseMismatchBuckets,

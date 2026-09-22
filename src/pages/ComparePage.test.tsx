@@ -116,7 +116,8 @@ describe('ComparePage', () => {
     })))
 
     expect(await screen.findByText('Raw agreement')).toBeInTheDocument()
-    expect(screen.getByText('50.0%')).toBeInTheDocument()
+    // The per-defender table shows rates too, so pin this to the metric card.
+    expect(screen.getAllByText('50.0%').length).toBeGreaterThan(0)
     // Exclusion counters are always visible, not hidden behind a toggle.
     // (Some labels also appear in the DiffGrid legend, hence getAllByText.)
     for (const label of ['Only one annotated', 'Dead ball', 'Defending team differs']) {

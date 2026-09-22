@@ -200,3 +200,56 @@ describe('every layer agrees on x for the same bucket', () => {
     expect(xs).toContain(shared.xOf(TARGET))
   })
 })
+
+describe('narrow disagreements stay identifiable', () => {
+  // A one-bucket disagreement is 13px wide — far below the 46px needed for
+  // text — so these used to render as mute slivers you had to hover to read.
+  const window_ = [400, 399.5, 399, 398.5]
+
+  function docFor(annotator: string, at399: AttackerId): AnnotationDocument {
+    const m = new Map<number, DocumentBucket>()
+    window_.forEach((bucket, i) => {
+      m.set(bucket, {
+        status: 'active', defTeam: 'AAA', frameStart: i,
+        assignments: new Map([[1, bucket === 399 ? at399 : (6 as AttackerId)]]),
+        confidence: new Map(), shot: false, rebound: false,
+      })
+    })
+    return {
+      annotator, gameId: 'G1', quarter: 1,
+      sourceFile: `${annotator}.json`, sourceFormat: 'json',
+      players: {
+        1: { name: 'Bell', jersey: '23' },
+        6: { name: 'Hall', jersey: '7' },
+        7: { name: 'King', jersey: '12' },
+      },
+      buckets: m,
+    }
+  }
+
+  const docA = docFor('Alice', 6)
+  const docB = docFor('Bob', 7)
+
+  it('splits a too-narrow bar into both annotators colours', () => {
+    const { container } = render(
+      <DiffGrid report={computeAgreement(docA, docB)} docA={docA} docB={docB} />,
+    )
+    const fills = [...container.querySelectorAll('span')]
+      .map(el => (el as HTMLElement).style.background)
+      .filter(Boolean)
+
+    expect(fills.some(f => f.includes('--annot-a'))).toBe(true)
+    expect(fills.some(f => f.includes('--annot-b'))).toBe(true)
+  })
+
+  it('keeps a narrow bar wide enough to click', () => {
+    render(<DiffGrid report={computeAgreement(docA, docB)} docA={docA} docB={docB} />)
+    const bar = screen.getByLabelText(/Different attacker/)
+    expect(parseFloat(bar.style.width)).toBeGreaterThanOrEqual(6)
+  })
+
+  it('still names both answers in the tooltip', () => {
+    render(<DiffGrid report={computeAgreement(docA, docB)} docA={docA} docB={docB} />)
+    expect(screen.getByLabelText(/Alice:#7 \/ Bob:#12/)).toBeInTheDocument()
+  })
+})

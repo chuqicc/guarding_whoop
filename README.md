@@ -60,10 +60,12 @@ The Spells view marks why each spell ended (⇄ switch · ■ dead ball · ⇆ d
 Drop in two exported files for the same quarter and get a reliability report plus a per-disagreement review.
 
 - Accepts **JSON or CSV**, and the two sides may be in different formats
-- **Raw agreement**, **Cohen's κ** (published with its marginals), **switch-event F1** (±1s tolerance), and dead-ball agreement
+- Metrics ordered by how far they can be trusted: **switch-event F1** (±1s tolerance) first, then dead-ball agreement, **Cohen's κ**, and the carry-forward-inflated raw rate last
 - Every excluded cell is counted and shown: coverage mismatch, dead-ball, defending-team mismatch
-- **Diff view** — consecutive buckets with the same verdict collapse into one bar; `n` / `p` step between disagreements; click one to jump the playhead and watch the play
-- **Export a disagreement CSV** to work through away from the tool
+- **A lane per disagreement type**, all on one clock axis — defending team, switch timing, dead ball — plus the per-defender grid
+- **By-defender table**: each defender's own agreement rate and κ, sorted by who they disagree about most
+- **Review view** — load the tracking JSON and footage, then step through disagreements with `n` / `p` with the court and video in view
+- **Export a reliability report** (self-contained HTML, including a draft methods paragraph) or a disagreement CSV
 
 <!-- SCREENSHOT: compare view with metric cards + diff bars -->
 

@@ -49,6 +49,10 @@
      pair against this surface: normal ΔE 16.9, deutan 16.2. The pink sits
      above the equal-weight lightness band deliberately — at equal lightness
      red and pink only reach ΔE ~11, which is below the legibility floor. */
+  /* Team identity, matching the court so a strip reads the same way the
+     animation does. Validated as a categorical pair: normal ΔE 27.1. */
+  --team-a: #4a90d9;
+  --team-b: #e05c5c;
   --annot-a: #e05c5c;
   --annot-b: #ff8fc7;
   --confidence-low: #e05c5c;
@@ -113,6 +117,8 @@
 
   /* Confidence indicators */
   /* Light-theme pair: ALL CHECKS PASS (normal ΔE 15.0). */
+  --team-a: #3a7bc8;
+  --team-b: #d14b4b;
   --annot-a: #d14b4b;
   --annot-b: #f06fae;
   --confidence-low: #d14b4b;
@@ -136,6 +142,16 @@
   --selection-hint-bg: rgba(58,123,200,0.55);
 }
 
+/* Never let a horizontal swipe become browser back/forward.
+   The annotation and compare views are wide, horizontally scrolling timelines,
+   so a trackpad swipe that reaches a scroll boundary used to chain up to the
+   document and trigger the history gesture. With every loaded file held in
+   memory, that navigation silently discarded the whole session — the tracking
+   JSON, both annotators' files and the video all had to be re-imported. */
+html, body {
+  overscroll-behavior-x: none;
+}
+
 body {
   margin: 0;
   background: var(--bg-page);
@@ -143,6 +159,12 @@ body {
   font-family: sans-serif;
 }
 * { box-sizing: border-box; }
+
+/* Stop scroll chaining between nested timelines as well, so a swipe that ends
+   at one lane's edge does not jump the lane behind it. */
+[data-scroll-x] {
+  overscroll-behavior-x: contain;
+}
 
 /* ── Bucket column clear button ──────────────────────────────────────────────
    Revealed on column hover (and on keyboard focus) rather than sitting

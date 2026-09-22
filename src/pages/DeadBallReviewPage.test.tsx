@@ -22,12 +22,15 @@ import type { LoadedTracking } from '../components/TrackingDropZone'
 
 const WINDOW = [400, 399.5, 399, 398.5, 398]
 
-function doc(annotator: string, dead: number[], quarter = 1, gameId = 'G1'): AnnotationDocument {
+function doc(
+  annotator: string, dead: number[], quarter = 1, gameId = 'G1',
+  teams: Record<number, string> = {},
+): AnnotationDocument {
   const buckets = new Map<number, DocumentBucket>()
   WINDOW.forEach((bucket, i) => {
     buckets.set(bucket, {
       status: dead.includes(bucket) ? 'dead' : 'active',
-      defTeam: 'AAA', frameStart: i,
+      defTeam: teams[bucket] ?? 'AAA', frameStart: i,
       assignments: new Map(), confidence: new Map(), shot: false, rebound: false,
     })
   })
@@ -201,5 +204,78 @@ describe('panel sizing', () => {
       expect(h).toHaveAttribute('tabindex', '0')
       expect(h.getAttribute('aria-label')).toMatch(/Resize/)
     }
+  })
+})
+
+describe('reviewing defending-team disagreements', () => {
+  it('opens on defending team when there is one to review', () => {
+    // It mis-orients a whole possession, so it outranks a dead-ball offset.
+    render(
+      <Page
+        docA={doc('Alice', [], 1, 'G1', { 399: 'BBB' })}
+        docB={doc('Bob', [])}
+        tracking={tracking()}
+      />,
+    )
+    expect(screen.getByRole('button', { name: /Defending team \(1\)/ }))
+      .toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('falls back to dead ball rather than landing on an empty list', () => {
+    render(
+      <Page docA={doc('Alice', [399])} docB={doc('Bob', [])} tracking={tracking()} />,
+    )
+    expect(screen.getByRole('button', { name: /Dead ball \(1\)/ }))
+      .toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('names the team each annotator gave', () => {
+    const { container } = render(
+      <Page
+        docA={doc('Alice', [], 1, 'G1', { 399: 'BBB' })}
+        docB={doc('Bob', [])}
+        tracking={tracking()}
+      />,
+    )
+    expect(container.textContent).toMatch(/Alice.*: BBB/s)
+    expect(container.textContent).toMatch(/Bob.*: AAA/s)
+  })
+
+  it('steps to the defending-team disagreement with n', async () => {
+    render(
+      <Page
+        docA={doc('Alice', [], 1, 'G1', { 399: 'BBB' })}
+        docB={doc('Bob', [])}
+        tracking={tracking()}
+      />,
+    )
+    await userEvent.keyboard('n')
+    expect(screen.getByText(/frame 2/)).toBeInTheDocument()   // third bucket
+  })
+
+  it('switches kinds and resets the position', async () => {
+    render(
+      <Page
+        docA={doc('Alice', [399.5], 1, 'G1', { 399: 'BBB' })}
+        docB={doc('Bob', [])}
+        tracking={tracking()}
+      />,
+    )
+    await userEvent.click(screen.getByRole('button', { name: /Dead ball/ }))
+    expect(screen.getByText(/1 \/ 1/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Dead ball/ }))
+      .toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('shows the count of each kind on its button', () => {
+    render(
+      <Page
+        docA={doc('Alice', [399.5], 1, 'G1', { 399: 'BBB' })}
+        docB={doc('Bob', [])}
+        tracking={tracking()}
+      />,
+    )
+    expect(screen.getByRole('button', { name: /Defending team \(1\)/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Dead ball \(1\)/ })).toBeInTheDocument()
   })
 })
