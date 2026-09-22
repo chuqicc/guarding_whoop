@@ -193,3 +193,27 @@ describe('notes popover — the time is readable', () => {
     expect(screen.getByPlaceholderText('Note at 6:40.0…')).toBeInTheDocument()
   })
 })
+
+describe('notes popover — not clipped by the scrolling top bar', () => {
+  /**
+   * The bar scrolls horizontally when it overflows, and an overflow container
+   * clips absolutely-positioned descendants — which made the popover open
+   * invisibly: the button toggled, nothing appeared. jsdom does no layout, so
+   * only the positioning contract can be asserted here.
+   */
+  it('escapes the overflow context instead of hanging inside it', async () => {
+    render(<TopBar onNewSession={vi.fn()} />)
+    await openNotes()
+
+    const popover = screen.getByLabelText('Close notes').closest('div[style]')!
+      .parentElement as HTMLElement
+    expect(popover.style.position).toBe('fixed')
+
+    // Guard the other half: if the bar ever stops scrolling, `fixed` is no
+    // longer load-bearing — but while it does scroll, absolute would clip.
+    const bar = popover.ownerDocument.querySelector('.topbar') as HTMLElement
+    if (bar && bar.style.overflowX === 'auto') {
+      expect(popover.style.position).not.toBe('absolute')
+    }
+  })
+})

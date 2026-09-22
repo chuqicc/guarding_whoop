@@ -53,12 +53,29 @@ export default function TopBar({ onNewSession }: Props) {
   useEffect(() => subscribeStorageStatus(setStorageStatus), [])
   const [notesOpen, setNotesOpen] = useState(false)
   const notesRef = useRef<HTMLDivElement>(null)
+  const notesBtnRef = useRef<HTMLButtonElement>(null)
+  // The popover is positioned fixed, not absolute: the top bar scrolls
+  // horizontally when it overflows, and an overflow container clips any
+  // absolutely-positioned child — which silently hid the whole popover.
+  // (Setting overflow on one axis forces the other from `visible` to `auto`,
+  // so there is no way to keep it inside and unclipped.)
+  const [notesPos, setNotesPos] = useState<{ top: number; right: number } | null>(null)
+
+  const placeNotes = () => {
+    const r = notesBtnRef.current?.getBoundingClientRect()
+    if (r) setNotesPos({ top: r.bottom + 4, right: window.innerWidth - r.right })
+  }
 
   // Close on an outside click or Escape. Without these the only way out was to
   // hit the toolbar toggle again — so people reached for the ✕ inside, which
   // deleted a note instead.
   useEffect(() => {
     if (!notesOpen) return
+    placeNotes()
+    // Follow the button if the layout moves underneath the open popover.
+    const onMove = () => placeNotes()
+    window.addEventListener('resize', onMove)
+    window.addEventListener('scroll', onMove, true)
     const onDown = (e: MouseEvent) => {
       if (!notesRef.current?.contains(e.target as Node)) setNotesOpen(false)
     }
@@ -70,6 +87,8 @@ export default function TopBar({ onNewSession }: Props) {
       clearTimeout(t)
       document.removeEventListener('mousedown', onDown)
       document.removeEventListener('keydown', onKey)
+      window.removeEventListener('resize', onMove)
+      window.removeEventListener('scroll', onMove, true)
     }
   }, [notesOpen])
   const [noteText, setNoteText]   = useState('')
@@ -320,6 +339,7 @@ export default function TopBar({ onNewSession }: Props) {
         {/* Notes popover */}
         <div style={{ position: 'relative' }}>
           <button
+            ref={notesBtnRef}
             onClick={() => setNotesOpen(v => !v)}
             disabled={!meta}
             aria-label="Toggle notes"
@@ -332,7 +352,9 @@ export default function TopBar({ onNewSession }: Props) {
 
           {notesOpen && meta && (
             <div ref={notesRef} style={{
-              position: 'absolute', top: '100%', right: 0, marginTop: 4,
+              position: 'fixed',
+              top: notesPos?.top ?? 44,
+              right: notesPos?.right ?? 10,
               width: 280, maxHeight: 320, overflowY: 'auto',
               background: 'var(--bg-panel)', border: '1px solid var(--border)',
               borderRadius: 6, padding: 8, zIndex: 50,
