@@ -202,3 +202,17 @@ th:hover > .bucket-clear {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+
+/* ── Note delete ─────────────────────────────────────────────────────────────
+   Kept faint until the row is hovered. The popover's ✕ closes it; a note is
+   destroyed by a separate, deliberate glyph, because having one ✕ that closed
+   and another that deleted cost people their notes. */
+.note-delete {
+  opacity: 0.25;
+  transition: opacity 0.12s ease;
+}
+*:hover > .note-delete,
+.note-delete:hover,
+.note-delete:focus-visible {
+  opacity: 1;
+}

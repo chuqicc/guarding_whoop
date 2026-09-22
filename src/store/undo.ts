@@ -4,7 +4,7 @@
 // more importantly, could not express "these five carry-forward writes are one
 // step". Inverse ops give exact granularity plus a label to show the annotator.
 
-import type { CellAnnotation } from './useStore'
+import type { CellAnnotation, AnnotationNote } from './useStore'
 
 /** The four slices of annotation state a transaction can touch. */
 export interface UndoPatch {
@@ -12,6 +12,7 @@ export interface UndoPatch {
   deadTimeBuckets?: number[]
   shotBuckets?: number[]
   reboundBuckets?: number[]
+  notes?: AnnotationNote[]
 }
 
 export interface Txn {

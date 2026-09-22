@@ -47,6 +47,26 @@ export default function TopBar({ onNewSession }: Props) {
   const [storageStatus, setStorageStatus] = useState<StorageStatus>({ state: 'ok' })
   useEffect(() => subscribeStorageStatus(setStorageStatus), [])
   const [notesOpen, setNotesOpen] = useState(false)
+  const notesRef = useRef<HTMLDivElement>(null)
+
+  // Close on an outside click or Escape. Without these the only way out was to
+  // hit the toolbar toggle again — so people reached for the ✕ inside, which
+  // deleted a note instead.
+  useEffect(() => {
+    if (!notesOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (!notesRef.current?.contains(e.target as Node)) setNotesOpen(false)
+    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setNotesOpen(false) }
+    // Deferred: the click that opened the popover is still propagating.
+    const t = setTimeout(() => document.addEventListener('mousedown', onDown), 0)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      clearTimeout(t)
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [notesOpen])
   const [noteText, setNoteText]   = useState('')
   const [noteDefenderId, setNoteDefenderId] = useState<string>('')
   const importRef         = useRef<HTMLInputElement>(null)
@@ -143,6 +163,10 @@ export default function TopBar({ onNewSession }: Props) {
     if (!noteText.trim() || currentBucket === null) return
     addNote(currentBucket, noteText.trim(), noteDefenderId ? parseInt(noteDefenderId) : undefined)
     setNoteText('')
+    // Reset the defender too. Leaving it set silently attributed every
+    // following note to whoever was picked last — and since the list only
+    // shows a jersey number, a wrong attribution is near-invisible afterwards.
+    setNoteDefenderId('')
   }
 
   return (
@@ -246,6 +270,8 @@ export default function TopBar({ onNewSession }: Props) {
           <button
             onClick={() => setNotesOpen(v => !v)}
             disabled={!meta}
+            aria-label="Toggle notes"
+            aria-expanded={notesOpen}
             style={btnStyle(notesOpen)}
             title="Timestamped notes for this file"
           >
@@ -253,13 +279,32 @@ export default function TopBar({ onNewSession }: Props) {
           </button>
 
           {notesOpen && meta && (
-            <div style={{
+            <div ref={notesRef} style={{
               position: 'absolute', top: '100%', right: 0, marginTop: 4,
               width: 280, maxHeight: 320, overflowY: 'auto',
               background: 'var(--bg-panel)', border: '1px solid var(--border)',
               borderRadius: 6, padding: 8, zIndex: 50,
               boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
             }}>
+              <div style={{
+                display: 'flex', alignItems: 'center', marginBottom: 6,
+                paddingBottom: 4, borderBottom: '1px solid var(--border-dim)',
+              }}>
+                <span style={{ fontSize: 11, color: 'var(--text-3)' }}>
+                  Notes{notes.length > 0 ? ` (${notes.length})` : ''}
+                </span>
+                {/* The ✕ people actually reach for. */}
+                <button
+                  onClick={() => setNotesOpen(false)}
+                  title="Close notes (Esc)"
+                  aria-label="Close notes"
+                  style={{
+                    marginLeft: 'auto', background: 'transparent', color: 'var(--text-3)',
+                    border: 'none', cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: '0 2px',
+                  }}
+                >✕</button>
+              </div>
+
               {notes.length === 0 && (
                 <div style={{ fontSize: 11, color: 'var(--text-4)', marginBottom: 6 }}>No notes yet.</div>
               )}
@@ -277,12 +322,19 @@ export default function TopBar({ onNewSession }: Props) {
                       </div>
                       <div>{n.text}</div>
                     </div>
+                    {/* Not a ✕: that glyph now closes the popover, and having
+                        both meant a mis-click destroyed a note. */}
                     <button
+                      className="note-delete"
                       onClick={() => removeNote(n.id)}
-                      title="Delete note"
-                      style={{ background: 'transparent', color: 'var(--text-4)', border: 'none', cursor: 'pointer', fontSize: 12, padding: 0 }}
+                      title="Delete this note (⌘Z undoes it)"
+                      aria-label={`Delete note: ${n.text.slice(0, 40)}`}
+                      style={{
+                        background: 'transparent', color: 'var(--text-4)',
+                        border: 'none', cursor: 'pointer', fontSize: 12, padding: 0,
+                      }}
                     >
-                      ✕
+                      🗑
                     </button>
                   </div>
                 )

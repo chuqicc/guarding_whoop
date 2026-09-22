@@ -182,6 +182,9 @@ const TRACKED = {
   deadTimeBuckets: 'deadtime',
   shotBuckets:     'shot',
   reboundBuckets:  'rebound',
+  // Notes are annotator work too. Deleting one used to be unrecoverable,
+  // which is punishing when the delete button is a mis-click away.
+  notes:           'notes',
 } as const
 
 type TrackedKey = keyof typeof TRACKED
@@ -447,15 +450,17 @@ export const useStore = create<AppStore>((set, get) => ({
   toggleTheme: () => set(s => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
 
   addNote: (bucket, text, defenderId) => {
-    set(s => ({
+    applyTxn(set, get, 'add note', ['notes'], s => ({
       notes: [...s.notes, { id: uuid(), bucket, defenderId, text, createdAt: new Date().toISOString() }],
     }))
-    persist('notes', get().quarterMeta, get().notes)
   },
 
   removeNote: (id) => {
-    set(s => ({ notes: s.notes.filter(n => n.id !== id) }))
-    persist('notes', get().quarterMeta, get().notes)
+    const note = get().notes.find(n => n.id === id)
+    const label = note ? `delete note "${note.text.slice(0, 24)}"` : 'delete note'
+    applyTxn(set, get, label, ['notes'], s => ({
+      notes: s.notes.filter(n => n.id !== id),
+    }))
   },
 
   setAnnotatorName: (name) => {
