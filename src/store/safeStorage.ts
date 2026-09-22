@@ -104,5 +104,10 @@ export function parseOrQuarantine<T>(key: string, isValid: (v: unknown) => v is 
   }
 }
 
+/** Read a key without parsing. Never throws; a blocked store reads as absent. */
+export function safeGet(key: string): string | null {
+  try { return localStorage.getItem(key) } catch { return null }
+}
+
 export const isNumberArray = (v: unknown): v is number[] =>
   Array.isArray(v) && v.every(n => typeof n === 'number' && !isNaN(n))

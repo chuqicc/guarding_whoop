@@ -3,6 +3,7 @@ import { useStore } from '../store/useStore'
 import { QUARTER_BUCKET_S } from '../constants'
 
 import { exportJSON, exportFrameCSV, exportNotesCSV } from '../utils/export'
+import { fmtClock } from '../utils/timelineScale'
 import { parseAnnotationCSV } from '../utils/importCSV'
 import { parseAnnotationJSON } from '../utils/importJSON'
 import { toggleBtnStyle } from '../utils/buttonStyle'
@@ -26,6 +27,10 @@ export default function TopBar({ onNewSession }: Props) {
   const currentFrame       = useStore(s => s.currentFrame)
   const cellAnnotations    = useStore(s => s.cellAnnotations)
   const deadTimeBuckets    = useStore(s => s.deadTimeBuckets)
+  const deadSeedCount      = useStore(s => s.deadSeedCount)
+  const deadSeedBuckets    = useStore(s => s.deadSeedBuckets)
+  const noShotClockBuckets = useStore(s => s.noShotClockBuckets)
+  const reseedDeadBuckets  = useStore(s => s.reseedDeadBuckets)
   const playerDict         = useStore(s => s.playerDict)
   const loadQuarter        = useStore(s => s.loadQuarter)
   const annotatorName      = useStore(s => s.annotatorName)
@@ -142,7 +147,7 @@ export default function TopBar({ onNewSession }: Props) {
   })
 
   const exportInput = meta ? {
-    annotations: cellAnnotations, deadTimeBuckets, shotBuckets, reboundBuckets,
+    annotations: cellAnnotations, deadTimeBuckets, deadSeedBuckets, shotBuckets, reboundBuckets,
     frames, meta, playerDict, annotatorName, annotationSeconds, notes,
   } : null
 
@@ -265,6 +270,44 @@ export default function TopBar({ onNewSession }: Props) {
           </span>
         )}
 
+        {/* Dead-ball count, and the one-time seed that produced it */}
+        {meta && (
+          <span
+            title={
+              `${deadTimeBuckets.length} buckets marked dead.`
+              + (deadSeedCount > 0
+                ? ` ${deadSeedCount} were auto-marked from the tracking data when this file was first opened — review them against the video and clear any that are wrong.`
+                : ' Auto-marking already ran for this file; your edits are kept.')
+              + (noShotClockBuckets.length > 0
+                ? ` ${noShotClockBuckets.length} buckets have no shot clock (hatched) and could not be judged automatically.`
+                : '')
+            }
+            style={{ fontSize: 11, color: 'var(--text-4)' }}
+          >
+            ⏸ {deadTimeBuckets.length} dead
+            {deadSeedCount > 0 && <> · <b style={{ color: 'var(--text-dead-active)' }}>{deadSeedCount} auto</b></>}
+          </span>
+        )}
+
+        {/* Re-run the seeding. Destructive, so it asks. */}
+        {meta && (
+          <button
+            onClick={() => {
+              const ok = window.confirm(
+                'Re-run auto-marking for dead balls?\n\n'
+                + 'This DISCARDS every dead mark in this file — including the ones you '
+                + 'added or cleared by hand — and derives them again from the tracking data.\n\n'
+                + '⌘Z undoes it.',
+              )
+              if (ok) reseedDeadBuckets()
+            }}
+            title="Discard all dead marks and derive them again from the tracking data"
+            style={{ ...btnStyle(false), fontSize: 11 }}
+          >
+            ⟳ Re-mark dead
+          </button>
+        )}
+
         {/* Notes popover */}
         <div style={{ position: 'relative' }}>
           <button
@@ -318,7 +361,7 @@ export default function TopBar({ onNewSession }: Props) {
                   }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ color: 'var(--text-4)', fontSize: 10 }}>
-                        bucket {n.bucket}{def ? ` · #${def.jersey} ${def.name}` : ''}
+                        {fmtClock(n.bucket)}{def ? ` · #${def.jersey} ${def.name}` : ''}
                       </div>
                       <div>{n.text}</div>
                     </div>
@@ -344,7 +387,7 @@ export default function TopBar({ onNewSession }: Props) {
                 <textarea
                   value={noteText}
                   onChange={e => setNoteText(e.target.value)}
-                  placeholder={currentBucket !== null ? `Note at bucket ${currentBucket}…` : 'Note…'}
+                  placeholder={currentBucket !== null ? `Note at ${fmtClock(currentBucket)}…` : 'Note…'}
                   rows={2}
                   style={{
                     background: 'var(--bg-cell)', color: 'var(--text-2)',

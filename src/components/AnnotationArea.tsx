@@ -25,6 +25,7 @@ export default function AnnotationArea() {
   const currentFrame       = useStore(s => s.currentFrame)
   const cellAnnotations    = useStore(s => s.cellAnnotations)
   const deadTimeBuckets    = useStore(s => s.deadTimeBuckets)
+  const noShotClockBuckets = useStore(s => s.noShotClockBuckets)
   const shotBuckets        = useStore(s => s.shotBuckets)
   const reboundBuckets     = useStore(s => s.reboundBuckets)
   const playerDict         = useStore(s => s.playerDict)
@@ -331,7 +332,7 @@ export default function AnnotationArea() {
                     {fmtClock(b)}
                   </div>
                   <div style={{ fontSize: 9, color: isActive ? '#4a7ac8' : 'var(--text-4)', marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
-                    {bucketShotClock.get(b) !== undefined ? bucketShotClock.get(b)!.toFixed(1) : ''}
+                    {bucketShotClock.get(b) !== undefined ? `${bucketShotClock.get(b)!.toFixed(1)}s` : ''}
                   </div>
                   <div style={{ fontSize: 9, color: isActive ? '#3a6aaa' : 'var(--text-4)', marginTop: 1, fontVariantNumeric: 'tabular-nums' }}>
                     {fStart !== undefined ? `f${fStart}` : ''}
@@ -359,15 +360,26 @@ export default function AnnotationArea() {
             {buckets.map(b => {
               const isDead   = deadTimeBuckets.includes(b)
               const isActive = b === currentBucket
+              // The shot clock is switched off for a quarter's last 24 seconds,
+              // so the seeding rules are blind there. Say so rather than let the
+              // absence of a mark read as "checked, and it was live".
+              const blind    = !isDead && noShotClockBuckets.includes(b)
               return (
                 <td
                   key={b}
                   onClick={() => useStore.getState().toggleDeadTimeBucket(b)}
-                  title={isDead ? 'Dead time — click to mark live' : 'Live — click to mark dead time'}
+                  title={
+                    isDead ? 'Dead time — click to mark live'
+                    : blind ? 'No shot clock here — auto-marking could not judge this bucket. Click to mark dead time.'
+                    : 'Live — click to mark dead time'
+                  }
                   style={{
                     width: CELL_W, minWidth: CELL_W, height: DEAD_ROW_H,
                     textAlign: 'center', verticalAlign: 'middle',
                     background: isDead ? 'var(--bg-dead)' : (isActive ? 'var(--bg-col-active)' : 'transparent'),
+                    backgroundImage: blind
+                      ? 'repeating-linear-gradient(45deg, transparent, transparent 3px, var(--border-dim) 3px, var(--border-dim) 4px)'
+                      : undefined,
                     border: isActive ? '1px solid #2a4a7a' : `1px solid ${isDead ? 'var(--border-dead-active)' : 'var(--border-dim)'}`,
                     cursor: 'pointer',
                     transition: 'background 0.1s',

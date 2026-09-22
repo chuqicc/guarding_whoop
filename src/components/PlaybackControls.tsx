@@ -1,11 +1,6 @@
 import { useStore } from '../store/useStore'
 import { toggleBtnStyle } from '../utils/buttonStyle'
-
-function formatClock(seconds: number): string {
-  const m = Math.floor(seconds / 60)
-  const s = Math.floor(seconds % 60)
-  return `${m}:${String(s).padStart(2, '0')}`
-}
+import { fmtClock } from '../utils/timelineScale'
 
 export default function PlaybackControls() {
   const isPlaying      = useStore(s => s.isPlaying)
@@ -121,11 +116,11 @@ export default function PlaybackControls() {
 
       {/* Clock display */}
       <span style={{ fontSize: 13, color: 'var(--text-2)', minWidth: 90, textAlign: 'right' }}>
-        Q{quarter} {formatClock(quarterClock)}
+        Q{quarter} {fmtClock(quarterClock)}
       </span>
       {shotClock !== null && (
-        <span style={{ fontSize: 13, color: shotClock <= 5 ? 'var(--accent-danger)' : 'var(--text-3)', minWidth: 60 }}>
-          Shot: {shotClock.toFixed(1)}
+        <span style={{ fontSize: 13, color: shotClock <= 5 ? 'var(--accent-danger)' : 'var(--text-3)', minWidth: 112 }}>
+          Shot clock {shotClock.toFixed(1)}s
         </span>
       )}
     </div>

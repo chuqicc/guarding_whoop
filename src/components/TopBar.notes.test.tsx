@@ -140,7 +140,7 @@ describe('notes popover — deleting', () => {
 })
 
 describe('notes popover — defender attribution', () => {
-  const noteBox = () => screen.getByPlaceholderText(/Note at bucket/)
+  const noteBox = () => screen.getByPlaceholderText(/^Note at /)
   const defenderSelect = () => screen.getByRole('combobox')
 
   const submit = async (text: string, defender?: string) => {
@@ -175,5 +175,21 @@ describe('notes popover — defender attribution', () => {
     await submit('about Cruz', '2')
 
     expect(useStore.getState().notes.map(n => n.defenderId)).toEqual([1, 2])
+  })
+})
+
+describe('notes popover — the time is readable', () => {
+  it('shows the game clock, not seconds remaining', async () => {
+    seedNote()                       // bucket 400 = 6:40.0 on the quarter clock
+    render(<TopBar onNewSession={vi.fn()} />)
+    await openNotes()
+    expect(screen.getByText(/6:40\.0/)).toBeInTheDocument()
+    expect(screen.queryByText(/bucket 400/)).not.toBeInTheDocument()
+  })
+
+  it('says where the note will land before it is written', async () => {
+    render(<TopBar onNewSession={vi.fn()} />)
+    await openNotes()
+    expect(screen.getByPlaceholderText('Note at 6:40.0…')).toBeInTheDocument()
   })
 })

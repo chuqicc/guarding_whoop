@@ -1,6 +1,7 @@
 import type { CellAnnotation, TrackingFrame, QuarterMeta, Player, AttackerId, AnnotationNote } from '../store/useStore'
 import { QUARTER_BUCKET_S } from '../constants'
 import { getBucketDefendingTeamId } from './defenseTeam'
+import { fmtClock } from './timelineScale'
 
 type ExportMeta = QuarterMeta
 
@@ -8,6 +9,13 @@ type ExportMeta = QuarterMeta
 export interface ExportInput {
   annotations: CellAnnotation[]
   deadTimeBuckets: number[]
+  /**
+   * What the dead-ball rules produced for this file (see utils/deriveDead).
+   * Optional so older callers keep working. Both annotators get the identical
+   * seed, so recording it is what lets a comparison separate "neither touched
+   * the automatic result" from a real difference of judgement.
+   */
+  deadSeedBuckets?: number[]
   shotBuckets: number[]
   reboundBuckets: number[]
   frames: TrackingFrame[]
@@ -48,6 +56,10 @@ function getFrameBucket(frame: TrackingFrame): number {
 export interface ExportBucketRow {
   bucket: number
   status: 'active' | 'dead'
+  /** Present on dead buckets: did the rules mark this, or did the annotator? */
+  dead_source?: 'auto' | 'manual'
+  /** Present on active buckets the rules had marked dead and the annotator cleared. */
+  auto_cleared?: true
   frame_start: number
   frame_end: number
   quarter_clock: number
@@ -61,9 +73,10 @@ export interface ExportBucketRow {
 }
 
 export function buildAnnotationExport(input: ExportInput) {
-  const { annotations, deadTimeBuckets, shotBuckets, reboundBuckets,
+  const { annotations, deadTimeBuckets, deadSeedBuckets, shotBuckets, reboundBuckets,
           frames, meta, playerDict, annotatorName, annotationSeconds, notes } = input
   const deadSet = new Set(deadTimeBuckets)
+  const seedSet = new Set(deadSeedBuckets ?? [])
 
   // Group frames by bucket, keeping chronological extents
   interface Grp {
@@ -106,6 +119,10 @@ export function buildAnnotationExport(input: ExportInput) {
         frame_start:  g.frameStart,
         frame_end:    g.frameEnd,
         quarter_clock: parseFloat(g.qcMax.toFixed(2)),
+      }
+      if (deadSeedBuckets !== undefined) {
+        if (isDead) row.dead_source = seedSet.has(bucket) ? 'auto' : 'manual'
+        else if (seedSet.has(bucket)) row.auto_cleared = true
       }
       if (g.scMax !== null)            row.shot_clock   = parseFloat(g.scMax.toFixed(2))
       if (g.momentStart !== undefined) row.moment_start = g.momentStart
@@ -303,27 +320,74 @@ export function exportFrameCSV(input: ExportInput) {
 
 // ── Notes export ───────────────────────────────────────────────────────────
 
+/**
+ * `createdAt` as a local wall-clock time, with the UTC offset kept.
+ *
+ * The stored value is a UTC ISO string, which reads as a different hour — and
+ * sometimes a different day — from when the note was actually written. The
+ * offset stays on the end so the exact instant is still recoverable.
+ */
+export function fmtLocalTimestamp(iso: string): string {
+  const d = new Date(iso)
+  // An unparseable value is passed through rather than turned into "Invalid Date".
+  if (isNaN(d.getTime())) return iso
+
+  const p = (n: number) => String(n).padStart(2, '0')
+  const offsetMin = -d.getTimezoneOffset()        // minutes east of UTC
+  const sign = offsetMin >= 0 ? '+' : '-'
+  const abs = Math.abs(offsetMin)
+
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} `
+       + `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())} `
+       + `${sign}${p(Math.floor(abs / 60))}:${p(abs % 60)}`
+}
+
+/**
+ * Notes as CSV.
+ *
+ * `clock` leads because it is the column a person reads: a note is about a
+ * moment in the game, and "1:45.5" says where that is while the raw 105.5
+ * seconds remaining does not. `bucket` stays alongside it as the key that
+ * joins back to the annotation export.
+ */
+export function buildNotesCSV(
+  notes: AnnotationNote[],
+  meta: ExportMeta,
+  playerDict: Record<number, Player>,
+): string {
+  const headers = [
+    'game_id', 'quarter', 'clock', 'bucket',
+    'defender_jersey', 'defender_name', 'text', 'created_at',
+  ]
+
+  // Chronological: the quarter clock counts down, so later notes have smaller
+  // buckets. Unsorted they came out in the order they were typed, which after
+  // any back-and-forth review bore no relation to the game.
+  const rows = [...notes]
+    .sort((a, b) => b.bucket - a.bucket)
+    .map(n => {
+      const defender = n.defenderId !== undefined ? playerDict[n.defenderId] : null
+      return csvRow([
+        meta.gameId,
+        meta.quarter,
+        fmtClock(n.bucket),
+        n.bucket,
+        defender?.jersey ?? '',
+        defender?.name ?? '',
+        n.text,
+        fmtLocalTimestamp(n.createdAt),
+      ])
+    })
+
+  return [headers.join(','), ...rows].join('\n')
+}
+
 export function exportNotesCSV(
   notes: AnnotationNote[],
   meta: ExportMeta,
   playerDict: Record<number, Player>
 ) {
-  const headers = ['game_id', 'quarter', 'bucket', 'defender_jersey', 'defender_name', 'text', 'created_at']
-
-  const rows = notes.map(n => {
-    const defender = n.defenderId !== undefined ? playerDict[n.defenderId] : null
-    return csvRow([
-      meta.gameId,
-      meta.quarter,
-      n.bucket,
-      defender?.jersey ?? '',
-      defender?.name ?? '',
-      n.text,
-      n.createdAt,
-    ])
-  })
-
-  download([headers.join(','), ...rows].join('\n'), `${meta.filename}_notes.csv`, 'text/csv')
+  download(buildNotesCSV(notes, meta, playerDict), `${meta.filename}_notes.csv`, 'text/csv')
 }
 
 // ── Helper ─────────────────────────────────────────────────────────────────

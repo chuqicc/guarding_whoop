@@ -2,7 +2,8 @@ import { create } from 'zustand'
 import { v4 as uuid } from 'uuid'
 import { parsePlayerDict } from '../utils/parseCSV'
 import { parseQuarterJSON } from '../utils/parseQuarterJSON'
-import { safeSet, parseOrQuarantine, isNumberArray } from './safeStorage'
+import { safeSet, safeGet, parseOrQuarantine, isNumberArray } from './safeStorage'
+import { deriveDead } from '../utils/deriveDead'
 import type { VideoSync } from '../utils/videoSync'
 import { pushTxn, resetHistory, undo as undoHistory, redo as redoHistory, type UndoPatch } from './undo'
 
@@ -78,6 +79,15 @@ interface AppStore {
   shotBuckets: number[]            // bucket keys marked with a shot attempt
   reboundBuckets: number[]         // bucket keys marked with a rebound
 
+  // ── Dead-ball seeding (see utils/deriveDead) ──
+  /** Buckets seeded from the tracking data on this load; 0 when already seeded. */
+  deadSeedCount: number
+  /** What the rules produced for this file, kept so exports can say which
+   *  dead marks are the annotator's own. */
+  deadSeedBuckets: number[]
+  /** Buckets the shot clock cannot speak for — mostly a quarter's last 24s. */
+  noShotClockBuckets: number[]
+
   // ── Auto-fill memory (carry previous bucket's assignments forward) ──
   autoFillMemory: boolean          // toggleable; false = never auto-fill
   memoryBarrierFrames: number[]    // frame indices where defense swapped; auto-fill never crosses these
@@ -106,6 +116,8 @@ interface AppStore {
   loadPlayerDict: (csvText: string) => void
   loadQuarter: (jsonText: string, filename: string) => void
   toggleDeadTimeBucket: (bucket: number) => void
+  /** Discard every dead mark and re-seed from the tracking data. Destructive. */
+  reseedDeadBuckets: () => void
   toggleShotBucket: (bucket: number) => void
   toggleReboundBucket: (bucket: number) => void
   toggleAutoFillMemory: () => void
@@ -238,6 +250,9 @@ export const useStore = create<AppStore>((set, get) => ({
   deadTimeBuckets: [],
   shotBuckets: [],
   reboundBuckets: [],
+  deadSeedCount: 0,
+  deadSeedBuckets: [],
+  noShotClockBuckets: [],
   autoFillMemory: localStorage.getItem('autoFillMemory') !== 'off',
   memoryBarrierFrames: [],
   pendingRestore: null,
@@ -266,7 +281,25 @@ export const useStore = create<AppStore>((set, get) => ({
     const pendingRestore: CellAnnotation[] | null =
       savedAnns && savedAnns.length > 0 ? savedAnns : null
 
-    const deadTimeBuckets = loadNumberArray(`deadtime_quarter_${quarterMeta.filename}`)
+    // Dead balls are seeded from the tracking data the FIRST time a quarter is
+    // opened, and never again. The annotator reviews every stoppage against the
+    // video and will clear the ones the rules got wrong; re-deriving on each
+    // load would silently put those back, which is data loss that looks like
+    // nothing at all. The seed flag is what makes it a one-time act.
+    const derived = deriveDead(frames)
+    const seedKey = `deadseed_quarter_${quarterMeta.filename}`
+    const alreadySeeded = safeGet(seedKey) !== null
+    const deadTimeBuckets = alreadySeeded
+      ? loadNumberArray(`deadtime_quarter_${quarterMeta.filename}`)
+      : derived.buckets
+    // The flag stores the seeded set, not just a marker: exports record which
+    // dead marks came from the rules and which the annotator made, and both
+    // annotators get the same seed — so every divergence is a human decision.
+    if (!alreadySeeded) {
+      safeSet(`deadtime_quarter_${quarterMeta.filename}`, JSON.stringify(deadTimeBuckets))
+      safeSet(seedKey, JSON.stringify(derived.buckets))
+    }
+    const deadSeedBuckets = alreadySeeded ? loadNumberArray(seedKey) : derived.buckets
     const shotBuckets    = loadNumberArray(`shot_quarter_${quarterMeta.filename}`)
     const reboundBuckets = loadNumberArray(`rebound_quarter_${quarterMeta.filename}`)
     const memoryBarrierFrames = loadNumberArray(`membarrier_quarter_${quarterMeta.filename}`)
@@ -285,7 +318,10 @@ export const useStore = create<AppStore>((set, get) => ({
         && typeof (v as VideoSync).videoName === 'string',
     )
     resetHistory()
-    set({ frames, quarterMeta, playerDict, currentFrame: 0, isPlaying: false, cellAnnotations: [], deadTimeBuckets, shotBuckets, reboundBuckets, memoryBarrierFrames, pendingRestore, notes, annotationSeconds, videoSync })
+    set({ frames, quarterMeta, playerDict, currentFrame: 0, isPlaying: false, cellAnnotations: [], deadTimeBuckets, shotBuckets, reboundBuckets, memoryBarrierFrames, pendingRestore, notes, annotationSeconds, videoSync,
+      deadSeedCount: alreadySeeded ? 0 : derived.buckets.length,
+      deadSeedBuckets,
+      noShotClockBuckets: derived.noShotClock })
   },
 
   setCurrentFrame:  (n) => set({ currentFrame: n }),
@@ -353,6 +389,22 @@ export const useStore = create<AppStore>((set, get) => ({
     applyTxn(set, get, `clear bucket ${bucket}`, ['cellAnnotations'], s => ({
       cellAnnotations: s.cellAnnotations.filter(c => c.shotClockBucket !== bucket),
     }))
+  },
+
+  reseedDeadBuckets: () => {
+    const { frames, quarterMeta } = get()
+    if (!quarterMeta) return
+    const derived = deriveDead(frames)
+    // Goes through applyTxn like any other edit, so a re-seed is one undo away.
+    applyTxn(set, get, 're-seed dead balls', ['deadTimeBuckets'], () => ({
+      deadTimeBuckets: derived.buckets,
+    }))
+    safeSet(`deadseed_quarter_${quarterMeta.filename}`, JSON.stringify(derived.buckets))
+    set({
+      deadSeedCount: derived.buckets.length,
+      deadSeedBuckets: derived.buckets,
+      noShotClockBuckets: derived.noShotClock,
+    })
   },
 
   toggleDeadTimeBucket: (bucket) => {
