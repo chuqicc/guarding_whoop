@@ -3,6 +3,7 @@ import { v4 as uuid } from 'uuid'
 import { parsePlayerDict } from '../utils/parseCSV'
 import { parseQuarterJSON } from '../utils/parseQuarterJSON'
 import { safeSet, parseOrQuarantine, isNumberArray } from './safeStorage'
+import type { VideoSync } from '../utils/videoSync'
 import { pushTxn, resetHistory, undo as undoHistory, redo as redoHistory, type UndoPatch } from './undo'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -86,6 +87,8 @@ interface AppStore {
 
   // ── Video ──
   videoUrl: string | null
+  /** Manual anchor tying tracking time to video time; see utils/videoSync. */
+  videoSync: VideoSync | null
 
   // ── Court display ──
   flipX: boolean
@@ -127,6 +130,7 @@ interface AppStore {
   clearBucketAnnotations: (bucket: number) => void
   dismissRestore: () => void
   setVideoUrl: (url: string | null) => void
+  setVideoSync: (sync: VideoSync | null) => void
   toggleFlipX: () => void
   toggleFlipY: () => void
   toggleTheme: () => void
@@ -235,6 +239,7 @@ export const useStore = create<AppStore>((set, get) => ({
   memoryBarrierFrames: [],
   pendingRestore: null,
   videoUrl: null,
+  videoSync: null,
   flipX: false,
   flipY: false,
   theme: 'dark' as const,
@@ -264,8 +269,20 @@ export const useStore = create<AppStore>((set, get) => ({
     const memoryBarrierFrames = loadNumberArray(`membarrier_quarter_${quarterMeta.filename}`)
     const notes = loadNotes(`notes_quarter_${quarterMeta.filename}`)
     const annotationSeconds = loadNumber(`anntime_quarter_${quarterMeta.filename}`)
+    // The anchor is kept, but the video itself is a blob URL that never
+    // survives a reload — so it stays unapplied until a video whose name and
+    // size match is loaded. Restoring it blind would silently mis-sync a
+    // different clip.
+    const videoSync = parseOrQuarantine(
+      `videosync_quarter_${quarterMeta.filename}`,
+      (v): v is VideoSync =>
+        !!v && typeof v === 'object'
+        && typeof (v as VideoSync).momentId === 'number'
+        && typeof (v as VideoSync).videoTime === 'number'
+        && typeof (v as VideoSync).videoName === 'string',
+    )
     resetHistory()
-    set({ frames, quarterMeta, playerDict, currentFrame: 0, isPlaying: false, cellAnnotations: [], deadTimeBuckets, shotBuckets, reboundBuckets, memoryBarrierFrames, pendingRestore, notes, annotationSeconds })
+    set({ frames, quarterMeta, playerDict, currentFrame: 0, isPlaying: false, cellAnnotations: [], deadTimeBuckets, shotBuckets, reboundBuckets, memoryBarrierFrames, pendingRestore, notes, annotationSeconds, videoSync })
   },
 
   setCurrentFrame:  (n) => set({ currentFrame: n }),
@@ -418,6 +435,11 @@ export const useStore = create<AppStore>((set, get) => ({
     const prev = get().videoUrl
     if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev)
     set({ videoUrl: url })
+  },
+
+  setVideoSync: (sync) => {
+    set({ videoSync: sync })
+    persist('videosync', get().quarterMeta, sync)
   },
 
   toggleFlipX: () => set(s => ({ flipX: !s.flipX })),

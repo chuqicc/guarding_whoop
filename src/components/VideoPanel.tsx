@@ -18,10 +18,30 @@ interface Props {
    */
   src?: string | null
   onPickFile?: (file: File) => void
+  /**
+   * Where the video should be, per the sync anchor. Seeks only when the value
+   * actually changes, so dragging the video by hand is not fought.
+   */
+  syncTime?: number | null
+  /** Called with the current video position when the user pins the anchor. */
+  onPin?: (videoTime: number, file: { name: string; size: number } | null) => void
+  /** Status line copy; null means "not synced yet". */
+  syncLabel?: string | null
+  onClearSync?: () => void
+  /** True when there is tracking loaded to anchor against. */
+  canSync?: boolean
+  /** Reports which file is loaded, so a saved anchor can be matched to it. */
+  onVideoFile?: (file: { name: string; size: number } | null) => void
 }
 
-export default function VideoPanel({ src, onPickFile }: Props = {}) {
+export default function VideoPanel({
+  src, onPickFile, syncTime, onPin, syncLabel, onClearSync, canSync = false, onVideoFile,
+}: Props = {}) {
   const videoRef = useRef<HTMLVideoElement>(null)
+  // Remembers the last position we seeked to, so a repeated syncTime (or the
+  // video's own timeupdate) does not yank the user back while they scrub.
+  const lastSeek = useRef<number | null>(null)
+  const [fileInfo, setFileInfo] = useState<{ name: string; size: number } | null>(null)
 
   const videoUrlStore   = useStore(s => s.videoUrl)
   const setVideoUrlStore = useStore(s => s.setVideoUrl)
@@ -79,6 +99,10 @@ export default function VideoPanel({ src, onPickFile }: Props = {}) {
   // ── File loading ──────────────────────────────────────────────────────────
   const loadFile = (file: File) => {
     if (!file.type.startsWith('video/')) return
+    const info = { name: file.name, size: file.size }
+    setFileInfo(info)
+    onVideoFile?.(info)
+    lastSeek.current = null
     // When controlled, the owner decides what to do with the file — it holds
     // the blob URL and is responsible for revoking it.
     if (controlled) { onPickFile?.(file); setVideoPlaying(false); return }
@@ -86,6 +110,18 @@ export default function VideoPanel({ src, onPickFile }: Props = {}) {
     setVideoPlaying(false)
     setVidTime(0); setVidDuration(0)
   }
+
+  // Follow the tracking playhead. Guarded on the value actually changing:
+  // re-seeking to the position we are already at would fight the user every
+  // time they scrubbed the video by hand.
+  useEffect(() => {
+    const vid = videoRef.current
+    if (!vid || syncTime === null || syncTime === undefined) return
+    if (lastSeek.current !== null && Math.abs(lastSeek.current - syncTime) < 0.02) return
+    lastSeek.current = syncTime
+    vid.currentTime = syncTime
+    setVidTime(syncTime)
+  }, [syncTime])
 
   // ── Video scrubber ────────────────────────────────────────────────────────
   const handleVideoScrub = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -119,6 +155,45 @@ export default function VideoPanel({ src, onPickFile }: Props = {}) {
             preload="auto"
             style={{ flex: 1, width: '100%', objectFit: 'contain', background: '#000', display: 'block', minHeight: 0 }}
           />
+
+          {canSync && (
+            <div style={{
+              flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8,
+              padding: '4px 8px', fontSize: 11,
+              background: 'var(--bg-surface)', borderTop: '1px solid var(--border)',
+              color: syncLabel ? 'var(--text-2)' : 'var(--text-3)',
+            }}>
+              {syncLabel ? (
+                <>
+                  <span>⚓ {syncLabel}</span>
+                  <button
+                    onClick={onClearSync}
+                    title="Forget this anchor"
+                    style={{
+                      marginLeft: 'auto', background: 'transparent', color: 'var(--text-4)',
+                      border: '1px solid var(--border)', borderRadius: 3,
+                      padding: '0 5px', fontSize: 10, cursor: 'pointer',
+                    }}
+                  >✕</button>
+                  <button
+                    onClick={() => onPin?.(videoRef.current?.currentTime ?? 0, fileInfo)}
+                    title="Re-anchor at the current video position"
+                    style={pinBtn}
+                  >⚓ Re-sync</button>
+                </>
+              ) : (
+                <>
+                  {/* A video file carries no absolute time, so the first anchor
+                      has to come from a person. After that it is arithmetic. */}
+                  <span>Scrub to the moment the court is showing, then pin it.</span>
+                  <button
+                    onClick={() => onPin?.(videoRef.current?.currentTime ?? 0, fileInfo)}
+                    style={{ ...pinBtn, marginLeft: 'auto' }}
+                  >⚓ Sync here</button>
+                </>
+              )}
+            </div>
+          )}
 
           <div style={{
             flexShrink: 0, background: 'var(--bg-surface)',
@@ -192,4 +267,10 @@ export default function VideoPanel({ src, onPickFile }: Props = {}) {
       )}
     </div>
   )
+}
+
+const pinBtn: React.CSSProperties = {
+  background: 'var(--bg-panel)', color: 'var(--text-1)',
+  border: '1px solid var(--accent)', borderRadius: 3,
+  padding: '1px 8px', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap',
 }

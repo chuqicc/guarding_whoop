@@ -17,6 +17,7 @@ import type { LoadedTracking } from './components/TrackingDropZone'
 import { useStore } from './store/useStore'
 import { useResizable } from './hooks/useResizable'
 import { useUnloadGuard } from './hooks/useUnloadGuard'
+import { videoTimeFor, syncMatchesVideo, formatOffset } from './utils/videoSync'
 import ResizeHandle from './components/ResizeHandle'
 
 // ── Panel size constants ─────────────────────────────────────────────────────
@@ -77,6 +78,43 @@ export default function App() {
   const isPlaying   = useStore(s => s.isPlaying)
   const currentFrame = useStore(s => s.currentFrame)
   const frames      = useStore(s => s.frames)
+  const videoSync   = useStore(s => s.videoSync)
+  const setVideoSync = useStore(s => s.setVideoSync)
+
+  // Where the video should sit for the frame currently shown. Null until the
+  // user has pinned an anchor — a video file carries no absolute time of its
+  // own, so the first correspondence has to come from them.
+  const currentMomentId = frames[currentFrame]?.momentId
+  // A restored anchor only applies to the file it was taken against. Blob URLs
+  // never survive a reload, so the video is always re-dropped; applying the
+  // anchor blind would silently mis-sync a different clip with no clue why.
+  const [videoFile, setVideoFileInfo] = useState<{ name: string; size: number } | null>(null)
+  const anchorApplies = videoSync !== null
+    && (videoSync.videoName === '' || videoFile === null
+        || syncMatchesVideo(videoSync, videoFile.name, videoFile.size))
+  const activeSync = anchorApplies ? videoSync : null
+
+  const syncResult = activeSync && currentMomentId !== undefined
+    ? videoTimeFor(activeSync, currentMomentId)
+    : null
+  const syncLabel = !videoSync
+    ? null
+    : !anchorApplies
+    ? `Saved anchor was taken against "${videoSync.videoName}" — pin again for this clip`
+    : `Synced · clip starts ${formatOffset(videoSync, frames[0]?.momentId)} into the tracking`
+      + (syncResult?.outOfRange === 'before' ? ' · ⚠ this moment is before the clip'
+        : syncResult?.outOfRange === 'after' ? ' · ⚠ this moment is past the clip'
+        : '')
+
+  const pinSync = (videoTime: number, file: { name: string; size: number } | null) => {
+    if (currentMomentId === undefined) return
+    setVideoSync({
+      momentId: currentMomentId,
+      videoTime,
+      videoName: file?.name ?? '',
+      videoSize: file?.size ?? 0,
+    })
+  }
 
   // Everything loaded lives in memory, so leaving the page throws the session
   // away. Arm the warning only when there is actually something to lose.
@@ -257,7 +295,14 @@ export default function App() {
       <div style={{ display: 'flex', flexShrink: 0, height: topH.size, minHeight: 0 }}>
         {/* Video panel — resizable width */}
         <div style={{ width: videoW.size, flexShrink: 0, overflow: 'hidden' }}>
-          <VideoPanel />
+          <VideoPanel
+            syncTime={syncResult?.time ?? null}
+            onPin={pinSync}
+            syncLabel={syncLabel}
+            onClearSync={() => setVideoSync(null)}
+            canSync={frames.length > 0}
+            onVideoFile={setVideoFileInfo}
+          />
         </div>
 
         <ResizeHandle resizable={videoW} label="Resize the video panel" />
