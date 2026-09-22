@@ -115,11 +115,11 @@ export default function PlaybackControls() {
       </div>
 
       {/* Clock display */}
-      <span style={{ fontSize: 13, color: 'var(--text-2)', minWidth: 90, textAlign: 'right' }}>
+      <span style={{ fontSize: 13, color: 'var(--text-2)', minWidth: 90, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
         Q{quarter} {fmtClock(quarterClock)}
       </span>
       {shotClock !== null && (
-        <span style={{ fontSize: 13, color: shotClock <= 5 ? 'var(--accent-danger)' : 'var(--text-3)', minWidth: 112 }}>
+        <span style={{ fontSize: 13, color: shotClock <= 5 ? 'var(--accent-danger)' : 'var(--text-3)', minWidth: 112, fontVariantNumeric: 'tabular-nums' }}>
           Shot clock {shotClock.toFixed(1)}s
         </span>
       )}

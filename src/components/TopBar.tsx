@@ -175,11 +175,20 @@ export default function TopBar({ onNewSession }: Props) {
   }
 
   return (
-    <div style={{
-      height: 40, background: 'var(--bg-panel)', display: 'flex', alignItems: 'center',
-      padding: '0 10px', gap: 8, fontSize: 13, flexShrink: 0,
-      borderBottom: '1px solid var(--border)',
-    }}>
+    <div
+      // The bar is a fixed-height flex row with no wrap, so on a narrow window
+      // the right-hand actions used to be pushed off the edge and become
+      // unreachable — export among them. Scrolling keeps everything available;
+      // `data-scroll-x` stops the swipe chaining into browser history, which
+      // would discard the loaded session (see index.css).
+      data-scroll-x
+      className="topbar"
+      style={{
+        height: 40, background: 'var(--bg-panel)', display: 'flex', alignItems: 'center',
+        padding: '0 10px', gap: 8, fontSize: 13, flexShrink: 0,
+        borderBottom: '1px solid var(--border)',
+        overflowX: 'auto', overflowY: 'hidden',
+      }}>
 
       {/* ── Left: navigation ── */}
       <button onClick={onNewSession} style={btnStyle(false)} title="Back to home">
@@ -209,11 +218,11 @@ export default function TopBar({ onNewSession }: Props) {
           </span>
         </>
       ) : (
-        <span style={{ color: '#444', fontSize: 12 }}>No data loaded</span>
+        <span style={{ color: 'var(--text-4)', fontSize: 12 }}>No data loaded</span>
       )}
 
       {/* ── Right: file actions ── */}
-      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
         {error && (
           <span style={{ fontSize: 11, color: 'var(--accent-danger)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
             title={error}>

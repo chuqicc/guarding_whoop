@@ -216,3 +216,82 @@ th:hover > .bucket-clear {
 .note-delete:focus-visible {
   opacity: 1;
 }
+
+/* ── Chrome polish ─────────────────────────────────────────────────────────
+
+   The app was styled almost entirely through inline React styles, which cover
+   colour and layout well but never reach the states a stylesheet owns: focus,
+   hover, disabled, scrollbars, selection. Those are what make an interface feel
+   finished, and their absence is what made it read as a prototype. */
+
+/* `sans-serif` resolves to Helvetica on macOS, while every <button>, <select>
+   and <input> ignored it entirely and fell back to the OS control font — so the
+   UI rendered in two typefaces at once. Only the family is inherited: the
+   inline `fontSize` each control sets must survive. */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+               'Helvetica Neue', Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button, input, select, textarea { font-family: inherit; }
+
+/* Keyboard focus was invisible almost everywhere — `--focus-ring` existed but
+   only two rules used it. Annotation is a keyboard task (arrows to step, 1/2/3
+   for confidence), so losing the focus point is a real cost, not a nicety. */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Buttons had no hover or press state at all: every click felt like it might
+   not have registered. Brightness composes with whatever background the inline
+   variant set, so this works for all four button variants without knowing them. */
+button:not(:disabled) {
+  transition: filter 0.12s ease, opacity 0.12s ease;
+}
+button:not(:disabled):hover   { filter: brightness(1.18); }
+button:not(:disabled):active  { filter: brightness(0.9); }
+:root[data-theme="light"] button:not(:disabled):hover  { filter: brightness(0.95); }
+:root[data-theme="light"] button:not(:disabled):active { filter: brightness(0.88); }
+
+/* A disabled export button looked identical to an enabled one, so "nothing
+   happened" was indistinguishable from "not allowed yet". */
+button:disabled,
+input:disabled,
+select:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Default scrollbars are light-on-light and sit right against the dark
+   timelines, which is the most conspicuous unstyled surface in the app. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--text-4); background-clip: content-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+::selection { background: var(--selection-hint-bg); color: var(--text-1); }
+
+/* The top bar scrolls only as an overflow fallback; a visible track inside a
+   40px chrome strip would read as a defect rather than an affordance. Scoped to
+   the bar alone — the timeline lanes share `data-scroll-x` and their scrollbars
+   are a primary way of moving through the quarter. */
+.topbar::-webkit-scrollbar { height: 0; }
+.topbar { scrollbar-width: none; }
