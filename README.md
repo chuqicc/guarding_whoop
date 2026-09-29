@@ -37,7 +37,8 @@ Load a quarter of SportVU tracking and assign each on-court defender to the atta
 - **0.5-second buckets** — one annotation covers half a second
 - **Carry-forward memory** — each bucket inherits the previous assignment, so you mark only what *changes*
 - **Automatic dead-ball marking** — stoppages are detected from the tracking data when a file is first opened (see below)
-- **Video sync** — anchor the footage to the tracking once, and it follows every jump from then on
+- **Video sync** — anchor the footage to the tracking, and it follows every jump from then on
+- **Team colours** — set each team's colour to match the shirts in the footage
 - **Shot and rebound flags**, **confidence ratings** (1–3), and **notes** tied to a moment
 - **Undo / redo** on every edit, and continuous autosave
 
@@ -58,6 +59,21 @@ This runs **once per file**, never again — your corrections are never overwrit
 Buckets with no shot clock at all — mostly a quarter's closing seconds — are hatched, because the rules cannot speak for them.
 
 > Roughly 7–12% of a quarter is marked, across 30–40 stoppages. Review them against the video as you go; the marking is a starting point, not a verdict.
+
+### Video sync that survives an edited clip
+
+Broadcast clips rarely run at wall-clock rate: a quarter spanning 24 minutes of real time and 12 minutes of game clock often arrives as a 15–20 minute file, because some stoppages were cut and others were not. One offset cannot fit that.
+
+So anchors are a set, not a single point. Scrub to a moment the court is also showing and click **⚓ Add anchor**; each anchor holds from where it was placed until the next, so a cut is absorbed by anchoring again just after it. Expand the status line to see every anchor as *game clock → video position*, and remove any that are wrong.
+
+**⬇ Sync points** writes the calibration to CSV and **⬆ Sync points** reads it back, so a clip is aligned once rather than once per session. The export also answers a question nothing else in the tool can:
+
+| Column | Meaning |
+|---|---|
+| `clip_offset_s` | Where the clip starts relative to the tracking, measured at that anchor |
+| `cut_before_s` | How many seconds of footage were removed since the previous anchor |
+
+A `cut_before_s` of zero throughout means the clip is continuous.
 
 ### Two views of the same work
 
@@ -95,7 +111,7 @@ Drop in two exported files for the same quarter for a reliability report and a p
 1. Click **Annotate Quarter**
 2. Optionally load `player_data.csv`, then drop in the quarter tracking JSON
 3. Optionally load a game video
-4. Scrub the video to the moment shown on court, then click **⚓ Sync here** — jumps carry the video from then on
+4. Scrub the video to the moment shown on court, then click **⚓ Sync here**. Add another anchor wherever the alignment drifts, and **⬆ Sync points** restores a saved calibration in one go.
 5. **Assign** by dragging an attacker from the roster onto a defender's cell, or onto `∅` for "guarding no one". Clicking a defender then an attacker on court works too.
 6. Toggle the defending team as possession changes; assignments for both teams are kept
 7. Review the automatic dead-ball marks and correct any that are wrong
@@ -154,13 +170,16 @@ Both formats carry the same content and round-trip losslessly.
 
 **Notes CSV** — free-text observations, exported separately. Each row leads with the game clock (`1:45.5`) and keeps the raw bucket alongside it for joining.
 
+**Sync points CSV** — the video calibration, so a clip is aligned once and not again. Only `moment_id` and `video_seconds` are load-bearing; the rest is written for people and recomputed on export, so a hand-edited file still imports.
+
 ---
 
 ## Good to know
 
 - **Set your annotator name** in the top bar. It is written into every export and labels the two sides in the comparison view.
 - Work is autosaved to local storage, keyed per source file. A **SAVE FAILED** badge means storage is full — export immediately.
-- Video sync rests on a single anchor. If a clip has been edited internally, re-anchor with **⚓ Re-sync** nearer the part you are working on.
+- Anchors belong to one clip, and are matched to it by file name and size. Dropping a different video starts a fresh set rather than mixing offsets from two edits.
+- Team colours are a display setting: stored once for the app, applied to the court, grid, timeline and comparison lanes alike, and never written into an export.
 
 ---
 
