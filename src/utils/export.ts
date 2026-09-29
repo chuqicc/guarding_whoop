@@ -2,6 +2,8 @@ import type { CellAnnotation, TrackingFrame, QuarterMeta, Player, AttackerId, An
 import { QUARTER_BUCKET_S } from '../constants'
 import { getBucketDefendingTeamId } from './defenseTeam'
 import { fmtClock } from './timelineScale'
+import { fmtVideoTime } from './videoSync'
+import type { VideoSync } from './videoSync'
 
 type ExportMeta = QuarterMeta
 
@@ -380,6 +382,71 @@ export function buildNotesCSV(
     })
 
   return [headers.join(','), ...rows].join('\n')
+}
+
+/**
+ * Every video-sync anchor placed on a quarter.
+ *
+ * `clip_offset_s` is where the clip starts relative to the tracking, measured
+ * from that anchor. With one anchor it is a curiosity; across several it is the
+ * useful column, because a change in it means footage was removed between the
+ * two — and `cut_before_s` states how much. That is the number that tells you
+ * whether a clip is continuous or has had stoppages edited out, which no other
+ * part of the tool can answer.
+ */
+export function buildSyncPointsCSV(
+  sync: VideoSync | null,
+  meta: ExportMeta,
+  frames: TrackingFrame[],
+): string {
+  const headers = [
+    'game_id', 'quarter', 'clock', 'bucket', 'moment_id',
+    'video_time', 'video_seconds', 'clip_offset_s', 'cut_before_s',
+    'video_file', 'created_at',
+  ]
+  if (!sync || sync.anchors.length === 0) return headers.join(',')
+
+  const firstMoment = frames[0]?.momentId
+  const byMoment = new Map(frames.filter(f => f.momentId !== undefined).map(f => [f.momentId!, f]))
+
+  let prevOffset: number | null = null
+  const rows = sync.anchors.map(a => {
+    const f = byMoment.get(a.momentId)
+    const bucket = f !== undefined
+      ? Math.floor(f.quarterClock / QUARTER_BUCKET_S) * QUARTER_BUCKET_S
+      : null
+    const offset = firstMoment !== undefined
+      ? a.videoTime - (a.momentId - firstMoment) / 1000
+      : null
+    const cut = offset !== null && prevOffset !== null
+      ? parseFloat((prevOffset - offset).toFixed(3))
+      : ''
+    if (offset !== null) prevOffset = offset
+
+    return csvRow([
+      meta.gameId,
+      meta.quarter,
+      bucket !== null ? fmtClock(bucket) : '',
+      bucket ?? '',
+      a.momentId,
+      fmtVideoTime(a.videoTime),
+      parseFloat(a.videoTime.toFixed(3)),
+      offset !== null ? parseFloat(offset.toFixed(3)) : '',
+      cut,
+      sync.videoName,
+      a.createdAt ? fmtLocalTimestamp(a.createdAt) : '',
+    ])
+  })
+
+  return [headers.join(','), ...rows].join('\n')
+}
+
+export function exportSyncPointsCSV(
+  sync: VideoSync | null,
+  meta: ExportMeta,
+  frames: TrackingFrame[],
+) {
+  download(buildSyncPointsCSV(sync, meta, frames), `${meta.filename}_syncpoints.csv`, 'text/csv')
 }
 
 export function exportNotesCSV(

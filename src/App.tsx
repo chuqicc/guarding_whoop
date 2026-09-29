@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useMemo } from 'react'
 import { stepBucket } from './utils/frameNav'
 import { isEditableTarget } from './utils/isEditableTarget'
 import UploadPage from './pages/UploadPage'
@@ -19,6 +19,8 @@ import { useResizable } from './hooks/useResizable'
 import { useUnloadGuard } from './hooks/useUnloadGuard'
 import { videoTimeFor, syncMatchesVideo, formatOffset } from './utils/videoSync'
 import ResizeHandle from './components/ResizeHandle'
+import { fmtClock } from './utils/timelineScale'
+import { QUARTER_BUCKET_S } from './constants'
 
 // ── Panel size constants ─────────────────────────────────────────────────────
 const VIDEO_DEFAULT_W = 480
@@ -75,11 +77,14 @@ export default function App() {
   const topH    = useResizable({ axis: 'y', initial: TOP_DEFAULT_H,    min: TOP_MIN_H,    max: TOP_MAX_H })
 
   const theme       = useStore(s => s.theme)
+  const teamColors   = useStore(s => s.teamColors)
   const isPlaying   = useStore(s => s.isPlaying)
   const currentFrame = useStore(s => s.currentFrame)
   const frames      = useStore(s => s.frames)
   const videoSync   = useStore(s => s.videoSync)
   const setVideoSync = useStore(s => s.setVideoSync)
+  const addVideoAnchor = useStore(s => s.addVideoAnchor)
+  const removeVideoAnchor = useStore(s => s.removeVideoAnchor)
 
   // Where the video should sit for the frame currently shown. Null until the
   // user has pinned an anchor — a video file carries no absolute time of its
@@ -100,20 +105,31 @@ export default function App() {
   const syncLabel = !videoSync
     ? null
     : !anchorApplies
-    ? `Saved anchor was taken against "${videoSync.videoName}" — pin again for this clip`
-    : `Synced · clip starts ${formatOffset(videoSync, frames[0]?.momentId)} into the tracking`
+    ? `Saved anchors were taken against "${videoSync.videoName}" — pin again for this clip`
+    : `${videoSync.anchors.length} anchor${videoSync.anchors.length === 1 ? '' : 's'}`
+      + ` · clip starts ${formatOffset(videoSync, frames[0]?.momentId)} into the tracking`
       + (syncResult?.outOfRange === 'before' ? ' · ⚠ this moment is before the clip'
         : syncResult?.outOfRange === 'after' ? ' · ⚠ this moment is past the clip'
         : '')
 
+  // Anchors carry only a Unix moment; the panel shows the game clock, which
+  // is what the annotator is actually looking at. Resolved here because this is
+  // where `frames` lives.
+  const anchorRows = useMemo(() => {
+    if (!anchorApplies || !videoSync) return []
+    return videoSync.anchors.map(a => {
+      const f = frames.find(fr => fr.momentId === a.momentId)
+      return {
+        momentId: a.momentId,
+        videoTime: a.videoTime,
+        clock: f ? fmtClock(Math.floor(f.quarterClock / QUARTER_BUCKET_S) * QUARTER_BUCKET_S) : '—',
+      }
+    })
+  }, [anchorApplies, videoSync, frames])
+
   const pinSync = (videoTime: number, file: { name: string; size: number } | null) => {
     if (currentMomentId === undefined) return
-    setVideoSync({
-      momentId: currentMomentId,
-      videoTime,
-      videoName: file?.name ?? '',
-      videoSize: file?.size ?? 0,
-    })
+    addVideoAnchor(currentMomentId, videoTime, file?.name ?? '', file?.size ?? 0)
   }
 
   // Everything loaded lives in memory, so leaving the page throws the session
@@ -136,6 +152,18 @@ export default function App() {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
   }, [theme])
+
+  // Mirror the team colours onto the CSS custom properties, so the lanes styled
+  // in the stylesheet (DefenseTeamStrip) match the canvas and grid, which read
+  // them through JS. An override is cleared rather than written back as a
+  // literal, letting each theme's own default reappear.
+  useEffect(() => {
+    const root = document.documentElement
+    for (const [side, value] of [['a', teamColors.a], ['b', teamColors.b]] as const) {
+      if (value) root.style.setProperty(`--team-${side}`, value)
+      else root.style.removeProperty(`--team-${side}`)
+    }
+  }, [teamColors])
 
   useEffect(() => { frameRef.current = currentFrame },       [currentFrame])
   useEffect(() => { framesLenRef.current = frames.length },  [frames.length])
@@ -300,6 +328,8 @@ export default function App() {
             onPin={pinSync}
             syncLabel={syncLabel}
             onClearSync={() => setVideoSync(null)}
+            anchors={anchorRows}
+            onRemoveAnchor={removeVideoAnchor}
             canSync={frames.length > 0}
             onVideoFile={setVideoFileInfo}
           />

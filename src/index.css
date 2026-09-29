@@ -295,3 +295,26 @@ select:disabled {
    are a primary way of moving through the quarter. */
 .topbar::-webkit-scrollbar { height: 0; }
 .topbar { scrollbar-width: none; }
+
+/* Native colour inputs render as a bevelled OS control that looks nothing like
+   the rest of the chrome. Stripped back to a plain swatch. */
+.team-swatch {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.team-swatch::-webkit-color-swatch-wrapper { padding: 0; }
+.team-swatch::-webkit-color-swatch {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+.team-swatch::-moz-color-swatch {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}

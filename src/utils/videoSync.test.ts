@@ -1,17 +1,15 @@
 import { describe, it, expect } from 'vitest'
-import {
-  videoTimeFor, frameForVideoTime, syncMatchesVideo, formatOffset, type VideoSync,
-} from './videoSync'
+import { addAnchor, anchorFor, formatOffset, frameForVideoTime, migrateSync, removeAnchor, syncMatchesVideo, type VideoSync, videoTimeFor } from './videoSync'
 import type { TrackingFrame } from '../store/useStore'
 
 // Real values from 0021500381.json — the first Q1 moment.
 const T0 = 1450323792107
 
 const sync: VideoSync = {
-  momentId: T0,
-  videoTime: 30,          // the clip shows that instant 30s in
   videoName: 'q1.mp4',
   videoSize: 12345,
+  // the clip shows the first tracking instant 30s in
+  anchors: [{ momentId: T0, videoTime: 30, createdAt: 'x' }],
 }
 
 describe('videoTimeFor', () => {
@@ -43,7 +41,7 @@ describe('videoTimeFor', () => {
 
   it('reports a moment before the clip starts, rather than silently parking at 0', () => {
     // Ordinary: a single-quarter clip usually begins after the tracking does.
-    const early: VideoSync = { ...sync, videoTime: 2 }
+    const early: VideoSync = { ...sync, anchors: [{ ...sync.anchors[0], videoTime: 2  }] }
     expect(videoTimeFor(early, T0 - 10_000)).toEqual({ time: 0, outOfRange: 'before' })
   })
 
@@ -119,16 +117,109 @@ describe('formatOffset', () => {
 
   it('handles an anchor taken later in the quarter', () => {
     // Anchored 90s into the clip, 60s of tracking after the start.
-    const later: VideoSync = { ...sync, momentId: T0 + 60_000, videoTime: 90 }
+    const later: VideoSync = { ...sync, anchors: [{ ...sync.anchors[0], momentId: T0 + 60_000, videoTime: 90  }] }
     expect(formatOffset(later, T0)).toBe('+30.0s')
   })
 
   it('reports a negative offset when the clip starts mid-tracking', () => {
-    const late: VideoSync = { ...sync, momentId: T0 + 60_000, videoTime: 10 }
+    const late: VideoSync = { ...sync, anchors: [{ ...sync.anchors[0], momentId: T0 + 60_000, videoTime: 10  }] }
     expect(formatOffset(late, T0)).toBe('-50.0s')
   })
 
   it('falls back to the raw anchor time with no tracking reference', () => {
     expect(formatOffset(sync, undefined)).toBe('30.0s')
+  })
+})
+
+describe('multiple anchors', () => {
+  const T = 1_700_000_000_000
+  const base: VideoSync = { videoName: 'q1.mp4', videoSize: 1, anchors: [] }
+  const at = (ms: number, videoTime: number) =>
+    ({ momentId: T + ms, videoTime, createdAt: 'x' })
+
+  // A clip with a 60s stoppage cut out of it: real time keeps running, the
+  // video does not, so the offset after the cut is 60s smaller.
+  const condensed: VideoSync = {
+    ...base,
+    anchors: [at(0, 10), at(120_000, 70)],
+  }
+
+  describe('anchorFor', () => {
+    it('uses the last anchor at or before the moment', () => {
+      expect(anchorFor(condensed, T + 119_999)?.videoTime).toBe(10)
+      expect(anchorFor(condensed, T + 120_000)?.videoTime).toBe(70)
+      expect(anchorFor(condensed, T + 500_000)?.videoTime).toBe(70)
+    })
+
+    it('falls back to the first anchor before the whole set', () => {
+      expect(anchorFor(condensed, T - 50_000)?.videoTime).toBe(10)
+    })
+
+    it('has nothing to say with no anchors', () => {
+      expect(anchorFor(base, T)).toBeNull()
+    })
+  })
+
+  describe('videoTimeFor', () => {
+    it('keeps a later anchor from reaching back over earlier footage', () => {
+      // At +60s the first anchor still governs: 10 + 60 = 70.
+      expect(videoTimeFor(condensed, T + 60_000).time).toBe(70)
+    })
+
+    it('absorbs the cut once past the second anchor', () => {
+      // Single-anchor arithmetic would say 10 + 180 = 190; the second anchor
+      // corrects it to 70 + 60 = 130, which is the point of having it.
+      expect(videoTimeFor(condensed, T + 180_000).time).toBe(130)
+    })
+
+    it('returns the anchor position exactly at each anchor', () => {
+      expect(videoTimeFor(condensed, T).time).toBe(10)
+      expect(videoTimeFor(condensed, T + 120_000).time).toBe(70)
+    })
+
+    it('reports nothing rather than guessing with no anchors', () => {
+      expect(videoTimeFor(base, T)).toEqual({ time: 0, outOfRange: null })
+    })
+  })
+
+  describe('addAnchor / removeAnchor', () => {
+    it('keeps anchors in chronological order however they are added', () => {
+      const s = addAnchor(addAnchor(base, T + 500, 5), T + 100, 1)
+      expect(s.anchors.map(a => a.momentId)).toEqual([T + 100, T + 500])
+    })
+
+    it('replaces an anchor on the same moment instead of duplicating it', () => {
+      const s = addAnchor(addAnchor(base, T, 5), T, 9)
+      expect(s.anchors).toHaveLength(1)
+      expect(s.anchors[0].videoTime).toBe(9)
+    })
+
+    it('removes only the one named', () => {
+      const s = removeAnchor(condensed, T + 120_000)
+      expect(s.anchors.map(a => a.momentId)).toEqual([T])
+    })
+
+    it('leaves the clip identity alone', () => {
+      expect(addAnchor(condensed, T + 9, 1).videoName).toBe('q1.mp4')
+    })
+  })
+})
+
+describe('migrateSync', () => {
+  it('converts the single-anchor shape earlier versions stored', () => {
+    const out = migrateSync({ momentId: 5, videoTime: 12, videoName: 'a.mp4', videoSize: 7 })
+    expect(out).toMatchObject({
+      videoName: 'a.mp4', videoSize: 7,
+      anchors: [{ momentId: 5, videoTime: 12 }],
+    })
+  })
+
+  it('passes the current shape through untouched', () => {
+    const v: VideoSync = { videoName: 'a', videoSize: 1, anchors: [{ momentId: 1, videoTime: 2, createdAt: 'x' }] }
+    expect(migrateSync(v)).toBe(v)
+  })
+
+  it.each([null, {}, 'nope', { momentId: 'x', videoTime: 1 }])('rejects %s', v => {
+    expect(migrateSync(v)).toBeNull()
   })
 })

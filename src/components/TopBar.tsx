@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { QUARTER_BUCKET_S } from '../constants'
 
-import { exportJSON, exportFrameCSV, exportNotesCSV } from '../utils/export'
+import { exportJSON, exportFrameCSV, exportNotesCSV, exportSyncPointsCSV } from '../utils/export'
 import { fmtClock } from '../utils/timelineScale'
 import { parseAnnotationCSV } from '../utils/importCSV'
 import { parseAnnotationJSON } from '../utils/importJSON'
@@ -29,6 +29,7 @@ export default function TopBar({ onNewSession }: Props) {
   const deadTimeBuckets    = useStore(s => s.deadTimeBuckets)
   const deadSeedCount      = useStore(s => s.deadSeedCount)
   const deadSeedBuckets    = useStore(s => s.deadSeedBuckets)
+  const videoSync          = useStore(s => s.videoSync)
   const noShotClockBuckets = useStore(s => s.noShotClockBuckets)
   const reseedDeadBuckets  = useStore(s => s.reseedDeadBuckets)
   const playerDict         = useStore(s => s.playerDict)
@@ -523,6 +524,16 @@ export default function TopBar({ onNewSession }: Props) {
           title="Export per-frame annotations: game_id, frame, moment_id, defender/attacker, gamestatus…"
         >
           ⬇ CSV
+        </button>
+
+        {/* Export video sync points */}
+        <button
+          disabled={!canExport || !videoSync || videoSync.anchors.length === 0}
+          onClick={() => { if (meta) exportSyncPointsCSV(videoSync, meta, frames) }}
+          style={btnStyle(!!videoSync && videoSync.anchors.length > 0)}
+          title="Export every video sync anchor, with where the clip starts at each one"
+        >
+          ⬇ Sync points
         </button>
 
         {/* Export notes CSV */}

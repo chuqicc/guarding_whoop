@@ -1,7 +1,8 @@
 import { useMemo } from 'react'
 import { useStore } from '../store/useStore'
 import { computeMarkingSpells, summariseSpells, type MarkingSpell, type SpellBreak } from '../utils/spells'
-import { QUARTER_BUCKET_S, COLOR_TEAM_A, COLOR_TEAM_B } from '../constants'
+import { QUARTER_BUCKET_S } from '../constants'
+import { useTeamColors } from '../utils/teamColors'
 
 const LABEL_W = 150
 const ROW_H   = 30
@@ -17,6 +18,7 @@ const BREAK_MARK: Record<SpellBreak, { mark: string; hint: string }> = {
 }
 
 export default function SpellTimeline() {
+  const teamColors = useTeamColors()
   const quarterMeta     = useStore(s => s.quarterMeta)
   const frames          = useStore(s => s.frames)
   const cellAnnotations = useStore(s => s.cellAnnotations)
@@ -100,7 +102,7 @@ export default function SpellTimeline() {
 
           {defenderIds.map(defId => {
             const p = playerDict[defId]
-            const color = p && quarterMeta.teamA.teamId === p.teamId ? COLOR_TEAM_A : COLOR_TEAM_B
+            const color = p && quarterMeta.teamA.teamId === p.teamId ? teamColors.a : teamColors.b
             const mine = spells.filter(s => s.defenderId === defId)
             return (
               <div key={defId} style={{ display: 'flex', height: ROW_H, alignItems: 'center' }}>

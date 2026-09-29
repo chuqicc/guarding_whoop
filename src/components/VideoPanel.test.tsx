@@ -34,18 +34,55 @@ describe('VideoPanel sync affordance', () => {
     expect(onPin).toHaveBeenCalledWith(42.5, null)
   })
 
-  it('shows the anchor state and offers to clear or redo it', () => {
-    render(<VideoPanel canSync syncLabel="Synced · clip starts +30.0s into the tracking" />)
-    expect(screen.getByText(/Synced · clip starts \+30\.0s/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Re-sync/ })).toBeInTheDocument()
-    expect(screen.getByTitle(/Forget this anchor/)).toBeInTheDocument()
+  it('shows the anchor state and offers to add another or clear them', () => {
+    render(<VideoPanel canSync syncLabel="2 anchors · clip starts +30.0s into the tracking" />)
+    expect(screen.getByText(/2 anchors · clip starts \+30\.0s/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Add anchor/ })).toBeInTheDocument()
+    expect(screen.getByLabelText('Clear all anchors')).toBeInTheDocument()
   })
 
-  it('clears the anchor on request', async () => {
+  it('clears every anchor on request', async () => {
     const onClearSync = vi.fn()
-    render(<VideoPanel canSync syncLabel="Synced" onClearSync={onClearSync} />)
-    await userEvent.click(screen.getByTitle(/Forget this anchor/))
+    render(<VideoPanel canSync syncLabel="1 anchor" onClearSync={onClearSync} />)
+    await userEvent.click(screen.getByLabelText('Clear all anchors'))
     expect(onClearSync).toHaveBeenCalled()
+  })
+
+  it('adds an anchor rather than replacing the existing one', async () => {
+    const onPin = vi.fn()
+    render(<VideoPanel canSync syncLabel="1 anchor" onPin={onPin} />)
+    const video = document.querySelector('video') as HTMLVideoElement
+    Object.defineProperty(video, 'currentTime', { value: 77.5, writable: true })
+    await userEvent.click(screen.getByRole('button', { name: /Add anchor/ }))
+    expect(onPin).toHaveBeenCalledWith(77.5, null)
+  })
+})
+
+describe('the anchor list', () => {
+  const anchors = [
+    { momentId: 1000, videoTime: 30, clock: '11:58.0' },
+    { momentId: 400_000, videoTime: 250, clock: '5:12.5' },
+  ]
+
+  it('stays collapsed until asked for', () => {
+    render(<VideoPanel canSync syncLabel="2 anchors" anchors={anchors} />)
+    expect(screen.queryByText('11:58.0')).not.toBeInTheDocument()
+  })
+
+  it('lists each anchor as game clock to video position', async () => {
+    render(<VideoPanel canSync syncLabel="2 anchors" anchors={anchors} />)
+    await userEvent.click(screen.getByRole('button', { name: /2 anchors/ }))
+    expect(screen.getByText('11:58.0')).toBeInTheDocument()
+    expect(screen.getByText('0:30.0')).toBeInTheDocument()
+    expect(screen.getByText('4:10.0')).toBeInTheDocument()
+  })
+
+  it('removes one without touching the others', async () => {
+    const onRemoveAnchor = vi.fn()
+    render(<VideoPanel canSync syncLabel="2 anchors" anchors={anchors} onRemoveAnchor={onRemoveAnchor} />)
+    await userEvent.click(screen.getByRole('button', { name: /2 anchors/ }))
+    await userEvent.click(screen.getByLabelText('Remove anchor at 5:12.5'))
+    expect(onRemoveAnchor).toHaveBeenCalledWith(400_000)
   })
 })
 

@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Stage, Layer, Image as KonvaImage, Circle, Text, Arrow, Group } from 'react-konva'
 import { useStore } from '../store/useStore'
 import type { TrackingFrame, Player, QuarterMeta } from '../store/useStore'
-import { COURT_W, COURT_H, COLOR_TEAM_A, COLOR_TEAM_B, COLOR_BALL, QUARTER_BUCKET_S } from '../constants'
+import { COURT_W, COURT_H, COLOR_BALL, QUARTER_BUCKET_S } from '../constants'
+import { useTeamColors } from '../utils/teamColors'
 import { toggleBtnStyle } from '../utils/buttonStyle'
 import courtPng from '../assets/court.png'
 
@@ -72,6 +73,7 @@ export default function CourtCanvas({
   const [selectedDefId, setSelectedDefId] = useState<number | null>(null)
   const [hoveredId,     setHoveredId]     = useState<number | null>(null)
 
+  const teamColors = useTeamColors()
   const framesStore        = useStore(s => s.frames)
   const currentFrameStore  = useStore(s => s.currentFrame)
   const cellAnnotations    = useStore(s => s.cellAnnotations)
@@ -283,7 +285,7 @@ export default function CourtCanvas({
             {frame && frame.players.map((p, idx) => {
               const { cx, cy } = toCanvas(p.x, p.y, stageW, stageH, flipX, flipY)
               const isTeamA  = meta ? p.teamId === meta.teamA.teamId : idx < 5
-              const color    = isTeamA ? COLOR_TEAM_A : COLOR_TEAM_B
+              const color    = isTeamA ? teamColors.a : teamColors.b
               const jersey   = playerDict[p.id]?.jersey ?? String(p.id)
               const isSelected = selectedDefId === p.id
               const isHovered  = hoveredId === p.id

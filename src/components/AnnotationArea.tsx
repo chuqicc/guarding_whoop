@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { isEditableTarget } from '../utils/isEditableTarget'
 import { useStore } from '../store/useStore'
-import { COLOR_TEAM_A, COLOR_TEAM_B, QUARTER_BUCKET_S } from '../constants'
+import { QUARTER_BUCKET_S } from '../constants'
+import { useTeamColors } from '../utils/teamColors'
 import { getBucketDefendingTeamId } from '../utils/defenseTeam'
 import { computeCarryForward } from '../utils/carryForward'
 
@@ -20,6 +21,7 @@ function fmtClock(s: number): string {
 }
 
 export default function AnnotationArea() {
+  const teamColors = useTeamColors()
   const quarterMeta        = useStore(s => s.quarterMeta)
   const frames             = useStore(s => s.frames)
   const currentFrame       = useStore(s => s.currentFrame)
@@ -46,8 +48,8 @@ export default function AnnotationArea() {
   // any historical defensive assignments recorded before the last swap.
   const curDefTeam  = meta.defendingTeamId === meta.teamA.teamId ? meta.teamA : meta.teamB
   const otherTeam   = meta.defendingTeamId === meta.teamA.teamId ? meta.teamB : meta.teamA
-  const curDefColor = curDefTeam.teamId === meta.teamA.teamId ? COLOR_TEAM_A : COLOR_TEAM_B
-  const otherColor  = otherTeam.teamId  === meta.teamA.teamId ? COLOR_TEAM_A : COLOR_TEAM_B
+  const curDefColor = curDefTeam.teamId === meta.teamA.teamId ? teamColors.a : teamColors.b
+  const otherColor  = otherTeam.teamId  === meta.teamA.teamId ? teamColors.a : teamColors.b
 
   const onCourtIds = new Set((frames[currentFrame]?.players ?? []).map(p => p.id))
   const historicalDefenderIds = new Set(cellAnnotations.map(c => c.defenderId))

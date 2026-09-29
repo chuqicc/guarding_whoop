@@ -5,6 +5,7 @@ import { parseQuarterJSON } from '../utils/parseQuarterJSON'
 import { safeSet, safeGet, parseOrQuarantine, isNumberArray } from './safeStorage'
 import { deriveDead } from '../utils/deriveDead'
 import type { VideoSync } from '../utils/videoSync'
+import { migrateSync, addAnchor, removeAnchor, emptySync } from '../utils/videoSync'
 import { pushTxn, resetHistory, undo as undoHistory, redo as redoHistory, type UndoPatch } from './undo'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -107,6 +108,9 @@ interface AppStore {
   // ── Theme ──
   theme: 'dark' | 'light'
 
+  /** Per-team colour overrides; null means the built-in default. */
+  teamColors: { a: string | null; b: string | null }
+
   // ── Annotation protocol metadata ──
   notes: AnnotationNote[]
   annotatorName: string
@@ -143,9 +147,14 @@ interface AppStore {
   dismissRestore: () => void
   setVideoUrl: (url: string | null) => void
   setVideoSync: (sync: VideoSync | null) => void
+  /** Pin the current tracking moment to a video position; see utils/videoSync. */
+  addVideoAnchor: (momentId: number, videoTime: number, videoName: string, videoSize: number) => void
+  removeVideoAnchor: (momentId: number) => void
   toggleFlipX: () => void
   toggleFlipY: () => void
   toggleTheme: () => void
+  setTeamColor: (side: 'a' | 'b', hex: string | null) => void
+  resetTeamColors: () => void
   addNote: (bucket: number, text: string, defenderId?: number) => void
   removeNote: (id: string) => void
   setAnnotatorName: (name: string) => void
@@ -168,6 +177,19 @@ function persist(prefix: string, quarterMeta: QuarterMeta | null, value: unknown
 function loadNotes(key: string | null): AnnotationNote[] {
   if (!key) return []
   return parseOrQuarantine(key, (v): v is AnnotationNote[] => Array.isArray(v)) ?? []
+}
+
+const TEAM_COLORS_KEY = 'teamcolors'
+
+/** Reads the stored overrides, ignoring anything that is not a hex colour. */
+function loadTeamColors(): { a: string | null; b: string | null } {
+  const raw = parseOrQuarantine(
+    TEAM_COLORS_KEY,
+    (v): v is Record<string, unknown> => !!v && typeof v === 'object',
+  )
+  const pick = (v: unknown) =>
+    typeof v === 'string' && /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(v) ? v : null
+  return { a: pick(raw?.a), b: pick(raw?.b) }
 }
 
 function loadNumberArray(key: string | null): number[] {
@@ -261,6 +283,9 @@ export const useStore = create<AppStore>((set, get) => ({
   flipX: false,
   flipY: false,
   theme: 'dark' as const,
+  // A viewing preference, not annotation data: stored once for the app rather
+  // than per quarter file, and deliberately outside the undo stack.
+  teamColors: loadTeamColors(),
   notes: [],
   annotatorName: localStorage.getItem('annotatorName') ?? '',
   annotationSeconds: 0,
@@ -309,14 +334,12 @@ export const useStore = create<AppStore>((set, get) => ({
     // survives a reload — so it stays unapplied until a video whose name and
     // size match is loaded. Restoring it blind would silently mis-sync a
     // different clip.
-    const videoSync = parseOrQuarantine(
+    // `migrateSync` also accepts the single-anchor shape earlier versions
+    // stored, so upgrading does not quarantine everyone's saved anchor.
+    const videoSync = migrateSync(parseOrQuarantine(
       `videosync_quarter_${quarterMeta.filename}`,
-      (v): v is VideoSync =>
-        !!v && typeof v === 'object'
-        && typeof (v as VideoSync).momentId === 'number'
-        && typeof (v as VideoSync).videoTime === 'number'
-        && typeof (v as VideoSync).videoName === 'string',
-    )
+      (v): v is unknown => !!v && typeof v === 'object',
+    ))
     resetHistory()
     set({ frames, quarterMeta, playerDict, currentFrame: 0, isPlaying: false, cellAnnotations: [], deadTimeBuckets, shotBuckets, reboundBuckets, memoryBarrierFrames, pendingRestore, notes, annotationSeconds, videoSync,
       deadSeedCount: alreadySeeded ? 0 : derived.buckets.length,
@@ -497,9 +520,41 @@ export const useStore = create<AppStore>((set, get) => ({
     persist('videosync', get().quarterMeta, sync)
   },
 
+  addVideoAnchor: (momentId, videoTime, videoName, videoSize) => {
+    const prev = get().videoSync
+    // Anchors belong to one clip. Dropping a different file starts a fresh set
+    // rather than mixing offsets measured against two different edits.
+    const base = prev && prev.videoName === videoName && prev.videoSize === videoSize
+      ? prev
+      : emptySync(videoName, videoSize)
+    const next = addAnchor(base, momentId, videoTime)
+    set({ videoSync: next })
+    persist('videosync', get().quarterMeta, next)
+  },
+
+  removeVideoAnchor: (momentId) => {
+    const prev = get().videoSync
+    if (!prev) return
+    const next = removeAnchor(prev, momentId)
+    set({ videoSync: next })
+    persist('videosync', get().quarterMeta, next)
+  },
+
   toggleFlipX: () => set(s => ({ flipX: !s.flipX })),
   toggleFlipY: () => set(s => ({ flipY: !s.flipY })),
   toggleTheme: () => set(s => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
+
+  setTeamColor: (side, hex) => {
+    const next = { ...get().teamColors, [side]: hex }
+    set({ teamColors: next })
+    safeSet(TEAM_COLORS_KEY, JSON.stringify(next))
+  },
+
+  resetTeamColors: () => {
+    const next = { a: null, b: null }
+    set({ teamColors: next })
+    safeSet(TEAM_COLORS_KEY, JSON.stringify(next))
+  },
 
   addNote: (bucket, text, defenderId) => {
     applyTxn(set, get, 'add note', ['notes'], s => ({

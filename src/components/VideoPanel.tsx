@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { toggleBtnStyle } from '../utils/buttonStyle'
+import { fmtVideoTime } from '../utils/videoSync'
 
 function fmtTime(s: number) {
   if (!isFinite(s) || s < 0) return '0:00'
@@ -32,11 +33,16 @@ interface Props {
   canSync?: boolean
   /** Reports which file is loaded, so a saved anchor can be matched to it. */
   onVideoFile?: (file: { name: string; size: number } | null) => void
+  /** Anchors in force for this clip, chronological, labelled with their game clock. */
+  anchors?: Array<{ momentId: number; videoTime: number; clock: string }>
+  onRemoveAnchor?: (momentId: number) => void
 }
 
 export default function VideoPanel({
   src, onPickFile, syncTime, onPin, syncLabel, onClearSync, canSync = false, onVideoFile,
+  anchors = [], onRemoveAnchor,
 }: Props = {}) {
+  const [anchorsOpen, setAnchorsOpen] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   // Remembers the last position we seeked to, so a repeated syncTime (or the
   // video's own timeupdate) does not yank the user back while they scrub.
@@ -165,10 +171,19 @@ export default function VideoPanel({
             }}>
               {syncLabel ? (
                 <>
-                  <span>⚓ {syncLabel}</span>
+                  <button
+                    onClick={() => setAnchorsOpen(v => !v)}
+                    aria-expanded={anchorsOpen}
+                    title="Show every anchor placed on this clip"
+                    style={{
+                      background: 'transparent', border: 'none', color: 'inherit',
+                      font: 'inherit', cursor: 'pointer', padding: 0, textAlign: 'left',
+                    }}
+                  >⚓ {syncLabel} {anchorsOpen ? '▾' : '▸'}</button>
                   <button
                     onClick={onClearSync}
-                    title="Forget this anchor"
+                    title="Forget every anchor on this clip"
+                    aria-label="Clear all anchors"
                     style={{
                       marginLeft: 'auto', background: 'transparent', color: 'var(--text-4)',
                       border: '1px solid var(--border)', borderRadius: 3,
@@ -177,9 +192,12 @@ export default function VideoPanel({
                   >✕</button>
                   <button
                     onClick={() => onPin?.(videoRef.current?.currentTime ?? 0, fileInfo)}
-                    title="Re-anchor at the current video position"
+                    // Adds rather than replaces: a broadcast clip that has had
+                    // stoppages cut out needs one anchor per surviving segment,
+                    // and each holds until the next.
+                    title="Anchor this moment too — corrects everything from here on"
                     style={pinBtn}
-                  >⚓ Re-sync</button>
+                  >⚓ Add anchor</button>
                 </>
               ) : (
                 <>
@@ -192,6 +210,31 @@ export default function VideoPanel({
                   >⚓ Sync here</button>
                 </>
               )}
+            </div>
+          )}
+
+          {canSync && anchorsOpen && anchors.length > 0 && (
+            <div style={{
+              flexShrink: 0, maxHeight: 120, overflowY: 'auto',
+              background: 'var(--bg-panel)', borderTop: '1px solid var(--border-dim)',
+              padding: '4px 8px', fontSize: 11, color: 'var(--text-3)',
+            }}>
+              {anchors.map(a => (
+                <div key={a.momentId} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '1px 0' }}>
+                  <span style={{ fontVariantNumeric: 'tabular-nums' }}>{a.clock}</span>
+                  <span style={{ color: 'var(--text-4)' }}>→</span>
+                  <span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmtVideoTime(a.videoTime)}</span>
+                  <button
+                    onClick={() => onRemoveAnchor?.(a.momentId)}
+                    title="Remove this anchor"
+                    aria-label={`Remove anchor at ${a.clock}`}
+                    style={{
+                      marginLeft: 'auto', background: 'transparent', color: 'var(--text-4)',
+                      border: 'none', cursor: 'pointer', fontSize: 11, padding: '0 2px',
+                    }}
+                  >🗑</button>
+                </div>
+              ))}
             </div>
           )}
 
