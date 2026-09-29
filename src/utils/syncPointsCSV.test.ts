@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { buildSyncPointsCSV } from './export'
 import type { VideoSync } from './videoSync'
+import { parseSyncPointsCSV } from './videoSync'
 import type { QuarterMeta, TrackingFrame } from '../store/useStore'
 
 const meta = {
@@ -77,5 +78,83 @@ describe('sync points CSV', () => {
       anchors: [{ momentId: T + 99_999_999, videoTime: 5, createdAt: 'x' }],
     }
     expect(rows(buildSyncPointsCSV(sync, meta, frames))[0].clock).toBe('')
+  })
+})
+
+describe('sync points CSV — reading it back', () => {
+  const sync: VideoSync = {
+    videoName: 'q1.mp4', videoSize: 1,
+    anchors: [
+      { momentId: T, videoTime: 30, createdAt: '2026-01-01T00:00:00.000Z' },
+      { momentId: T + 120_000, videoTime: 90, createdAt: '2026-01-01T00:05:00.000Z' },
+    ],
+  }
+
+  it('round-trips every anchor — the point of exporting them', () => {
+    const back = parseSyncPointsCSV(buildSyncPointsCSV(sync, meta, frames))
+    expect(back.anchors.map(a => [a.momentId, a.videoTime]))
+      .toEqual([[T, 30], [T + 120_000, 90]])
+    expect(back.videoName).toBe('q1.mp4')
+    expect(back.skipped).toBe(0)
+  })
+
+  it('survives a value that the display column would have rounded', () => {
+    const odd: VideoSync = { ...sync, anchors: [{ momentId: T, videoTime: 30.04, createdAt: 'x' }] }
+    // `video_time` renders as 0:30.0; `video_seconds` is the column that keeps it.
+    expect(parseSyncPointsCSV(buildSyncPointsCSV(odd, meta, frames)).anchors[0].videoTime)
+      .toBeCloseTo(30.04, 3)
+  })
+
+  it('falls back to the readable column when video_seconds is absent', () => {
+    const csv = 'moment_id,video_time\n' + `${T},2:05.5`
+    expect(parseSyncPointsCSV(csv).anchors).toEqual([
+      expect.objectContaining({ momentId: T, videoTime: 125.5 }),
+    ])
+  })
+
+  it('ignores the derived columns, so a hand-edited file still loads', () => {
+    const csv = 'moment_id,video_seconds,clip_offset_s,cut_before_s\n'
+      + `${T},30,nonsense,also nonsense`
+    expect(parseSyncPointsCSV(csv).anchors).toHaveLength(1)
+  })
+
+  it('sorts what it reads, however the rows were ordered', () => {
+    const csv = `moment_id,video_seconds\n${T + 500},9\n${T},1`
+    expect(parseSyncPointsCSV(csv).anchors.map(a => a.momentId)).toEqual([T, T + 500])
+  })
+
+  it('counts unreadable rows instead of dropping them silently', () => {
+    const csv = `moment_id,video_seconds\n${T},30\nnot-a-number,5\n${T + 1},\n`
+    const out = parseSyncPointsCSV(csv)
+    expect(out.anchors).toHaveLength(1)
+    expect(out.skipped).toBe(2)
+  })
+
+  it('keeps the first of two rows on the same moment', () => {
+    const csv = `moment_id,video_seconds\n${T},30\n${T},99`
+    const out = parseSyncPointsCSV(csv)
+    expect(out.anchors).toHaveLength(1)
+    expect(out.anchors[0].videoTime).toBe(30)
+    expect(out.skipped).toBe(1)
+  })
+
+  it('handles a quoted filename containing a comma', () => {
+    const csv = 'moment_id,video_seconds,video_file\n' + `${T},30,"LAL vs MIN, Q1.mp4"`
+    expect(parseSyncPointsCSV(csv).videoName).toBe('LAL vs MIN, Q1.mp4')
+  })
+
+  it('tolerates CRLF and a byte-order mark', () => {
+    const csv = `\uFEFFmoment_id,video_seconds\r\n${T},30\r\n`
+    expect(parseSyncPointsCSV(csv).anchors).toHaveLength(1)
+  })
+
+  it('reads nothing from a header it does not recognise', () => {
+    const out = parseSyncPointsCSV('a,b\n1,2')
+    expect(out.anchors).toEqual([])
+    expect(out.skipped).toBe(1)
+  })
+
+  it('reads nothing from an empty file', () => {
+    expect(parseSyncPointsCSV('')).toEqual({ anchors: [], videoName: '', skipped: 0 })
   })
 })

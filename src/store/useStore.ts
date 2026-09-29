@@ -6,6 +6,7 @@ import { safeSet, safeGet, parseOrQuarantine, isNumberArray } from './safeStorag
 import { deriveDead } from '../utils/deriveDead'
 import type { VideoSync } from '../utils/videoSync'
 import { migrateSync, addAnchor, removeAnchor, emptySync } from '../utils/videoSync'
+import type { SyncAnchor } from '../utils/videoSync'
 import { pushTxn, resetHistory, undo as undoHistory, redo as redoHistory, type UndoPatch } from './undo'
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -98,8 +99,10 @@ interface AppStore {
 
   // ── Video ──
   videoUrl: string | null
-  /** Manual anchor tying tracking time to video time; see utils/videoSync. */
+  /** Manual anchors tying tracking time to video time; see utils/videoSync. */
   videoSync: VideoSync | null
+  /** Identity of the clip currently loaded — anchors are only valid against it. */
+  videoFileInfo: { name: string; size: number } | null
 
   // ── Court display ──
   flipX: boolean
@@ -147,9 +150,12 @@ interface AppStore {
   dismissRestore: () => void
   setVideoUrl: (url: string | null) => void
   setVideoSync: (sync: VideoSync | null) => void
+  setVideoFileInfo: (info: { name: string; size: number } | null) => void
   /** Pin the current tracking moment to a video position; see utils/videoSync. */
   addVideoAnchor: (momentId: number, videoTime: number, videoName: string, videoSize: number) => void
   removeVideoAnchor: (momentId: number) => void
+  /** Replace the whole anchor set, e.g. from an imported calibration file. */
+  setVideoAnchors: (anchors: SyncAnchor[], videoName: string, videoSize: number) => void
   toggleFlipX: () => void
   toggleFlipY: () => void
   toggleTheme: () => void
@@ -280,6 +286,7 @@ export const useStore = create<AppStore>((set, get) => ({
   pendingRestore: null,
   videoUrl: null,
   videoSync: null,
+  videoFileInfo: null,
   flipX: false,
   flipY: false,
   theme: 'dark' as const,
@@ -515,6 +522,8 @@ export const useStore = create<AppStore>((set, get) => ({
     set({ videoUrl: url })
   },
 
+  setVideoFileInfo: (info) => set({ videoFileInfo: info }),
+
   setVideoSync: (sync) => {
     set({ videoSync: sync })
     persist('videosync', get().quarterMeta, sync)
@@ -528,6 +537,12 @@ export const useStore = create<AppStore>((set, get) => ({
       ? prev
       : emptySync(videoName, videoSize)
     const next = addAnchor(base, momentId, videoTime)
+    set({ videoSync: next })
+    persist('videosync', get().quarterMeta, next)
+  },
+
+  setVideoAnchors: (anchors, videoName, videoSize) => {
+    const next = { videoName, videoSize, anchors: [...anchors].sort((a, b) => a.momentId - b.momentId) }
     set({ videoSync: next })
     persist('videosync', get().quarterMeta, next)
   },

@@ -93,7 +93,8 @@ export default function App() {
   // A restored anchor only applies to the file it was taken against. Blob URLs
   // never survive a reload, so the video is always re-dropped; applying the
   // anchor blind would silently mis-sync a different clip with no clue why.
-  const [videoFile, setVideoFileInfo] = useState<{ name: string; size: number } | null>(null)
+  const videoFile = useStore(s => s.videoFileInfo)
+  const setVideoFileInfo = useStore(s => s.setVideoFileInfo)
   const anchorApplies = videoSync !== null
     && (videoSync.videoName === '' || videoFile === null
         || syncMatchesVideo(videoSync, videoFile.name, videoFile.size))

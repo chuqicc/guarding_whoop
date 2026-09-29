@@ -195,3 +195,99 @@ export function fmtVideoTime(seconds: number): string {
   const s = seconds % 60
   return `${m}:${s.toFixed(1).padStart(4, '0')}`
 }
+
+// ── Round-tripping a calibration ───────────────────────────────────────────
+//
+// Anchors are saved per quarter file in local storage, but that is not enough
+// on its own: a blob URL never survives a reload, storage gets cleared, work
+// moves between machines, and two annotators working from the same clip should
+// not each have to re-align it. Exporting the anchors and reading them back is
+// what makes a calibration a thing you keep rather than something you redo.
+
+export interface ParsedSyncPoints {
+  anchors: SyncAnchor[]
+  /** The clip the file was calibrated against, blank if it did not say. */
+  videoName: string
+  /** Rows that could not be read — reported rather than quietly dropped. */
+  skipped: number
+}
+
+/** Split one CSV line, honouring quoted fields and doubled quotes inside them. */
+function splitRow(line: string): string[] {
+  const out: string[] = []
+  let cur = ''
+  let quoted = false
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]
+    if (quoted) {
+      if (c === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++ }
+        else quoted = false
+      } else cur += c
+    } else if (c === '"') quoted = true
+    else if (c === ',') { out.push(cur); cur = '' }
+    else cur += c
+  }
+  out.push(cur)
+  return out
+}
+
+/** `m:ss.s` back to seconds; NaN when it is not that shape. */
+function parseVideoTime(v: string): number {
+  const m = /^(\d+):([0-5]?\d(?:\.\d+)?)$/.exec(v.trim())
+  return m ? parseInt(m[1], 10) * 60 + parseFloat(m[2]) : NaN
+}
+
+/**
+ * Read a sync-points CSV back into anchors.
+ *
+ * Only `moment_id` and the video position are load-bearing; `clock`,
+ * `clip_offset_s` and `cut_before_s` are derived columns written for people and
+ * are recomputed on export, so a file edited by hand stays importable as long
+ * as those two survive. `video_seconds` is preferred over `video_time` because
+ * it has not been rounded for display.
+ */
+export function parseSyncPointsCSV(text: string): ParsedSyncPoints {
+  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter(l => l.trim() !== '')
+  if (lines.length < 2) return { anchors: [], videoName: '', skipped: 0 }
+
+  const header = splitRow(lines[0]).map(h => h.trim().toLowerCase())
+  const col = (name: string) => header.indexOf(name)
+  const iMoment = col('moment_id')
+  const iSeconds = col('video_seconds')
+  const iTime = col('video_time')
+  const iFile = col('video_file')
+  const iCreated = col('created_at')
+
+  if (iMoment < 0 || (iSeconds < 0 && iTime < 0)) {
+    return { anchors: [], videoName: '', skipped: lines.length - 1 }
+  }
+
+  const anchors: SyncAnchor[] = []
+  const seen = new Set<number>()
+  let videoName = ''
+  let skipped = 0
+
+  for (const line of lines.slice(1)) {
+    const cells = splitRow(line)
+    const momentId = Number(cells[iMoment])
+    const videoTime = iSeconds >= 0 && cells[iSeconds]?.trim() !== ''
+      ? Number(cells[iSeconds])
+      : parseVideoTime(cells[iTime] ?? '')
+
+    if (!Number.isFinite(momentId) || !Number.isFinite(videoTime) || seen.has(momentId)) {
+      skipped++
+      continue
+    }
+    seen.add(momentId)
+    anchors.push({
+      momentId,
+      videoTime,
+      createdAt: cells[iCreated]?.trim() || new Date().toISOString(),
+    })
+    if (!videoName && iFile >= 0) videoName = cells[iFile]?.trim() ?? ''
+  }
+
+  anchors.sort((a, b) => a.momentId - b.momentId)
+  return { anchors, videoName, skipped }
+}

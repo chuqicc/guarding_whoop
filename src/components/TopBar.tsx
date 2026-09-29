@@ -3,6 +3,7 @@ import { useStore } from '../store/useStore'
 import { QUARTER_BUCKET_S } from '../constants'
 
 import { exportJSON, exportFrameCSV, exportNotesCSV, exportSyncPointsCSV } from '../utils/export'
+import { parseSyncPointsCSV } from '../utils/videoSync'
 import { fmtClock } from '../utils/timelineScale'
 import { parseAnnotationCSV } from '../utils/importCSV'
 import { parseAnnotationJSON } from '../utils/importJSON'
@@ -30,6 +31,8 @@ export default function TopBar({ onNewSession }: Props) {
   const deadSeedCount      = useStore(s => s.deadSeedCount)
   const deadSeedBuckets    = useStore(s => s.deadSeedBuckets)
   const videoSync          = useStore(s => s.videoSync)
+  const videoFileInfo      = useStore(s => s.videoFileInfo)
+  const setVideoAnchors    = useStore(s => s.setVideoAnchors)
   const noShotClockBuckets = useStore(s => s.noShotClockBuckets)
   const reseedDeadBuckets  = useStore(s => s.reseedDeadBuckets)
   const playerDict         = useStore(s => s.playerDict)
@@ -97,6 +100,7 @@ export default function TopBar({ onNewSession }: Props) {
   const importRef         = useRef<HTMLInputElement>(null)
   const importCSVRef      = useRef<HTMLInputElement>(null)
   const swapRef           = useRef<HTMLInputElement>(null)
+  const syncRef           = useRef<HTMLInputElement>(null)
 
   const meta = quarterMeta
 
@@ -182,6 +186,33 @@ export default function TopBar({ onNewSession }: Props) {
   const handleExportNotesCSV = () => {
     if (!meta) return
     exportNotesCSV(notes, meta, playerDict)
+  }
+
+  const handleImportSyncPoints = async (file: File) => {
+    const { anchors, videoName, skipped } = parseSyncPointsCSV(await readFile(file))
+    if (anchors.length === 0) {
+      window.alert(`No sync points found in "${file.name}".\n\n`
+        + 'The file needs a `moment_id` column and either `video_seconds` or `video_time`.')
+      return
+    }
+    const existing = videoSync?.anchors.length ?? 0
+    if (existing > 0 && !window.confirm(
+      `Replace the ${existing} anchor${existing === 1 ? '' : 's'} on this quarter `
+      + `with the ${anchors.length} in "${file.name}"?`,
+    )) return
+
+    // Adopt the loaded clip's identity so the anchors apply straight away. A
+    // blank name means "whatever gets loaded", which is right when the video is
+    // not open yet — the alternative is anchors that silently never take effect.
+    setVideoAnchors(anchors, videoFileInfo?.name ?? '', videoFileInfo?.size ?? 0)
+
+    const notes: string[] = []
+    if (skipped > 0) notes.push(`${skipped} row${skipped === 1 ? '' : 's'} could not be read.`)
+    if (videoName && videoFileInfo && videoName !== videoFileInfo.name) {
+      notes.push(`Calibrated against "${videoName}", but "${videoFileInfo.name}" is loaded —`
+        + ' check the alignment before trusting it.')
+    }
+    if (notes.length > 0) window.alert(`Imported ${anchors.length} sync points.\n\n${notes.join('\n')}`)
   }
 
   const handleAddNote = () => {
@@ -535,6 +566,17 @@ export default function TopBar({ onNewSession }: Props) {
         >
           ⬇ Sync points
         </button>
+
+        {/* Import sync points */}
+        <label style={{ ...btnStyle(false), display: 'inline-flex', alignItems: 'center' }}
+               title="Load a previously exported set of video sync anchors">
+          ⬆ Sync points
+          <input ref={syncRef} type="file" accept=".csv" style={{ display: 'none' }}
+            onChange={e => {
+              if (e.target.files?.[0]) handleImportSyncPoints(e.target.files[0])
+              e.target.value = ''
+            }} />
+        </label>
 
         {/* Export notes CSV */}
         <button
